@@ -68,3 +68,51 @@
 - **Tags Created & Pushed**: `v0.1.0`
 - **GitHub Release**: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.1.0`
 - **Working Tree**: Clean.
+
+## Phase 2: Service Discovery & Protocol Fingerprinting
+- **Status**: COMPLETE (Awaiting User Review / Approval for Phase 3)
+- **Implemented Features**:
+  - Modular protocol fingerprinting probes:
+    - `HTTPProbe`: minimal RFC 9112 HEAD/GET request parsing of status line, `Server`, and `X-Powered-By` headers; detects HTTPS redirects.
+    - `TLSProbe`: SSL/TLS certificate metadata extraction (subject CN, issuer CN, validity dates, SANs, protocol version, cipher suite, expired/self-signed detection) via non-intrusive handshake.
+    - `SSHProbe`: RFC 4253 protocol banner extraction (OpenSSH, dropbear, libssh, OS comments, candidate CPE generation).
+    - `SMTPProbe`: RFC 5321 MTA greeting banner parser (Postfix, Exim, Sendmail, Exchange).
+    - `FTPProbe`: RFC 959 FTP daemon greeting banner parser (vsftpd, ProFTPD, Pure-FTPd).
+    - `DatabaseProbe`: Safe listener identification for Redis (RESP `PING`), MySQL/MariaDB (initial server handshake packet), and PostgreSQL (`SSLRequest`).
+  - Central `ServiceDetector` orchestrator with port-prioritized probe execution and evidence-calibrated confidence scoring (`HIGH`, `MEDIUM`, `LOW`, `UNKNOWN`).
+  - Safe banner sanitization (`sanitize_banner` and `safe_close_writer`) to prevent terminal escape injection, log pollution, and resource leaks.
+  - Optional `NmapAdapter`:
+    - Sandboxed subprocess execution (`shell=False`) with conservative service arguments (`-sT -sV --version-light`).
+    - Execution duration limits and 10 MB stdout buffer bounding.
+    - Hardened XML parsing via `defusedxml` protecting against XXE injection and entity expansion bombs.
+    - Normalization of Nmap XML into unified `ServiceFingerprint` models.
+  - Enhanced Typer CLI with `--fingerprint / --no-fingerprint` and `--use-nmap` options, rendering Service, Product, Version, Confidence, and Latency in Rich tables.
+- **Files Created**:
+  - `src/reconforge/fingerprinting/__init__.py`
+  - `src/reconforge/fingerprinting/models.py`
+  - `src/reconforge/fingerprinting/service_detector.py`
+  - `src/reconforge/fingerprinting/nmap_adapter.py`
+  - `src/reconforge/fingerprinting/probes/base.py`
+  - `src/reconforge/fingerprinting/probes/http_probe.py`
+  - `src/reconforge/fingerprinting/probes/tls_probe.py`
+  - `src/reconforge/fingerprinting/probes/ssh_probe.py`
+  - `src/reconforge/fingerprinting/probes/smtp_probe.py`
+  - `src/reconforge/fingerprinting/probes/ftp_probe.py`
+  - `src/reconforge/fingerprinting/probes/database_probe.py`
+  - `tests/unit/test_fingerprints.py`
+  - `tests/unit/test_nmap_parser.py`
+  - `tests/security/test_xml_security.py`
+  - `tests/integration/test_local_services.py`
+- **Files Modified**:
+  - `pyproject.toml` (version bumped to 0.2.0, added defusedxml dependency)
+  - `CHANGELOG.md` (documented v0.2.0 release)
+  - `src/reconforge/core/models.py` (added ServiceFingerprint to PortObservation and ScanConfig)
+  - `src/reconforge/discovery/tcp_scanner.py` (integrated service detection into open port pipeline)
+  - `src/reconforge/cli.py` (added fingerprinting flags and table columns)
+  - `progress/decisions.md` (added ADR-006 and ADR-007)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Test suite expanded to 42 tests across unit, integration, and security boundaries. All 42 tests passed.
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low).
+  - Code formatting & linting: Ruff reported 0 errors, 38 files verified.
+- **Next Recommended Action**: Obtain user review and approval for Phase 2; then proceed to Phase 3 (Normalized Asset Inventory & Data Model).

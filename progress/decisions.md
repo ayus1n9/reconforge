@@ -55,3 +55,23 @@
   - Implement token-bucket rate limiting via `AsyncTokenBucketRateLimiter(rate_per_second)`.
   - Max single CIDR expansion capped at 4,096 addresses to avoid memory exhaustion on wide CIDRs.
 - **Consequences**: Guaranteed predictable CPU and memory profile, preventing DoS of the scanning host.
+
+## ADR-006: Modular Protocol Probes vs Raw Port Inference
+- **Date**: 2026-10-25
+- **Status**: ACCEPTED
+- **Context**: Port numbers alone do not determine service identity (e.g. HTTP running on 8080/8443, SSH running on 2222, non-HTTP services running on 80/443).
+- **Decision**:
+  - Implement modular, non-intrusive protocol probes (`HTTPProbe`, `TLSProbe`, `SSHProbe`, `SMTPProbe`, `FTPProbe`, `DatabaseProbe`).
+  - Prioritize probes based on common default ports for performance, but execute empirical protocol verification without assuming identity.
+  - Confidence scoring must strictly correlate with actual evidence (`HIGH` = verified handshake & version, `MEDIUM` = verified handshake without version, `LOW` = weak heuristic, `UNKNOWN` = open port without protocol match).
+- **Consequences**: Accurate attack-surface observations without false assumptions.
+
+## ADR-007: Hardened Subprocess Execution and XXE-Safe XML Parsing
+- **Date**: 2026-10-25
+- **Status**: ACCEPTED
+- **Context**: Executing external scanner binaries (Nmap) and parsing XML output introduces command injection, XXE, and resource exhaustion vulnerabilities.
+- **Decision**:
+  - Never execute shell wrappers (`shell=False`, argument vector execution only).
+  - Enforce subprocess execution timeout and 10 MB maximum stdout buffer limit.
+  - Parse XML output strictly using `defusedxml` to block external entity resolution (XXE) and recursive entity expansion bombs (Billion Laughs).
+- **Consequences**: Secure and robust optional integration of established third-party scanning tools.

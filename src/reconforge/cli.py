@@ -13,7 +13,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 
 from reconforge import __version__
-from reconforge.core.enums import PortState
+from reconforge.core.enums import ObservationConfidence, PortState
 from reconforge.core.exceptions import ScopeViolationError
 from reconforge.core.models import (
     ScanConfig,
@@ -60,7 +60,7 @@ def scan(
     ],
     ports: Annotated[
         str, typer.Option("--ports", "-p", help="Port specification (e.g. '80,443', '1-1024').")
-    ] = "21,22,25,53,80,110,143,443,445,3306,3389,5432,8080,8443",
+    ] = "21,22,25,53,80,110,143,443,445,3306,3389,5432,6379,8080,8443",
     concurrency: Annotated[
         int, typer.Option("--concurrency", "-c", help="Maximum concurrent probe tasks.")
     ] = 50,
@@ -82,6 +82,18 @@ def scan(
         bool,
         typer.Option("--host-discovery", help="Perform pre-scan TCP host liveness discovery."),
     ] = False,
+    fingerprint: Annotated[
+        bool,
+        typer.Option(
+            "--fingerprint/--no-fingerprint",
+            "-F",
+            help="Attempt protocol service fingerprinting on open ports.",
+        ),
+    ] = True,
+    use_nmap: Annotated[
+        bool,
+        typer.Option("--use-nmap", help="Use optional local Nmap service scan integration."),
+    ] = False,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Confirm execution without interactive prompt.")
     ] = False,
@@ -94,7 +106,7 @@ def scan(
 ) -> None:
     """Execute an authorized asynchronous TCP discovery assessment.
 
-    Strict scope allowlisting, DNS pinning, and bounded concurrency are enforced.
+    Strict scope allowlisting, DNS pinning, bounded concurrency, and service fingerprinting are enforced.
     """
     setup_logging(level="DEBUG" if verbose else "INFO")
 
@@ -152,6 +164,7 @@ def scan(
                 f"• [bold]Targets:[/bold] {len(scan_targets)} resolved destinations ({', '.join(t.ip for t in scan_targets[:5])}{'...' if len(scan_targets) > 5 else ''})\n"
                 f"• [bold]Ports:[/bold] {len(parsed_ports)} ({ports})\n"
                 f"• [bold]Total Probes:[/bold] {total_probes}\n"
+                f"• [bold]Fingerprinting:[/bold] {fingerprint} (Nmap: {use_nmap})\n"
                 f"• [bold]Concurrency:[/bold] {concurrency} (Rate Limit: {rate_limit}/sec)\n"
                 f"• [bold]Public Internet Allowed:[/bold] {allow_public}\n\n"
                 f"[red]NOTICE: Ensure you have explicit written authorization for all target networks.[/red]",
@@ -168,6 +181,8 @@ def scan(
         concurrency=concurrency,
         rate_limit_per_second=rate_limit,
         skip_host_discovery=not host_discovery,
+        fingerprint_services=fingerprint,
+        use_nmap=use_nmap,
     )
 
     # 4. Asynchronous Scan Execution
@@ -186,7 +201,8 @@ def scan(
         disable=json_output,
     ) as progress_ui:
         task_id = progress_ui.add_task(
-            "[cyan]Scanning target ports...", total=len(scan_targets) * len(parsed_ports)
+            "[cyan]Scanning & identifying target ports...",
+            total=len(scan_targets) * len(parsed_ports),
         )
 
         def update_progress(p: ScanProgress):
@@ -215,23 +231,41 @@ def scan(
         border_style="dim",
     )
     table.add_column("Target IP", style="bold")
-    table.add_column("Hostname", style="dim")
     table.add_column("Port", justify="right")
     table.add_column("State", justify="center")
+    table.add_column("Service", style="cyan")
+    table.add_column("Product", style="green")
+    table.add_column("Version", style="bold yellow")
+    table.add_column("Confidence", justify="center")
     table.add_column("Latency (ms)", justify="right")
-    table.add_column("Notes", style="italic")
 
     open_obs = [obs for obs in observations if obs.state == PortState.OPEN]
     other_obs = [obs for obs in observations if obs.state != PortState.OPEN]
 
     for obs in open_obs:
+        srv = obs.service
+        service_str = srv.service_name if srv else "unknown"
+        product_str = srv.product or "-" if srv else "-"
+        version_str = srv.version or "-" if srv else "-"
+        conf_str = "-"
+        if srv:
+            color = {
+                ObservationConfidence.HIGH: "green",
+                ObservationConfidence.MEDIUM: "yellow",
+                ObservationConfidence.LOW: "magenta",
+                ObservationConfidence.UNKNOWN: "dim",
+            }.get(srv.confidence, "white")
+            conf_str = f"[{color}]{srv.confidence.value.upper()}[/{color}]"
+
         table.add_row(
             obs.target_ip,
-            obs.hostname or "-",
             str(obs.port),
             "[bold green]OPEN[/bold green]",
+            service_str,
+            product_str,
+            version_str,
+            conf_str,
             f"{obs.response_time_ms:.1f}" if obs.response_time_ms else "-",
-            "Handshake completed",
         )
 
     # If verbose, display closed/timeout/filtered rows
@@ -247,11 +281,13 @@ def scan(
             }.get(obs.state, "white")
             table.add_row(
                 obs.target_ip,
-                obs.hostname or "-",
                 str(obs.port),
                 f"[{state_color}]{obs.state.value.upper()}[/{state_color}]",
+                "-",
+                "-",
+                "-",
+                "-",
                 f"{obs.response_time_ms:.1f}" if obs.response_time_ms else "-",
-                obs.error_message or "-",
             )
 
     console.print(table)

@@ -1,10 +1,10 @@
-"""Asynchronous TCP connect scanner with bounded concurrency, rate limiting, and scope validation."""
+"""Asynchronous TCP connect scanner with bounded concurrency, rate limiting, and service fingerprinting."""
 
 import asyncio
 import errno
 import logging
 import time
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 from reconforge.core.enums import PortState, ScanStatus, TransportProtocol
 from reconforge.core.exceptions import ScopeViolationError
@@ -18,6 +18,8 @@ from reconforge.core.models import (
 )
 from reconforge.core.scope import ScopeManager
 from reconforge.discovery.rate_limiter import AsyncTokenBucketRateLimiter
+from reconforge.fingerprinting.nmap_adapter import NmapAdapter
+from reconforge.fingerprinting.service_detector import ServiceDetector
 
 logger = logging.getLogger("reconforge.scanner")
 
@@ -31,6 +33,7 @@ class AsyncTCPScanner:
     - Every probe validates authorization against ScopeManager before opening a socket.
     - Full socket cleanup (no leaked file descriptors).
     - Responsive cancellation and deterministic progress reporting.
+    - Optional non-intrusive service fingerprinting on open ports.
     """
 
     def __init__(
@@ -38,12 +41,16 @@ class AsyncTCPScanner:
         scope_manager: ScopeManager,
         config: ScanConfig | None = None,
         progress_callback: Callable[[ScanProgress], None] | None = None,
+        service_detector: ServiceDetector | None = None,
+        nmap_adapter: NmapAdapter | None = None,
     ):
         self.scope_manager = scope_manager
         self.config = config or ScanConfig()
         self.progress_callback = progress_callback
         self.rate_limiter = AsyncTokenBucketRateLimiter(self.config.rate_limit_per_second)
         self.semaphore = asyncio.Semaphore(self.config.concurrency)
+        self.service_detector = service_detector or ServiceDetector()
+        self.nmap_adapter = nmap_adapter or NmapAdapter()
 
         self._cancelled = False
         self._completed_probes = 0
@@ -121,7 +128,7 @@ class AsyncTCPScanner:
                     source="internal_tcp_connect",
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Distinct from filtered: we did not receive an ICMP filter response
                 return PortObservation(
                     target_ip=target.ip,
@@ -243,7 +250,7 @@ class AsyncTCPScanner:
     ) -> tuple[list[PortObservation], ScanSummary]:
         """Execute an asynchronous scan across multiple targets and ports.
 
-        Maintains bounded concurrency and telemetry progress reporting.
+        Maintains bounded concurrency, telemetry progress reporting, and optional service fingerprinting.
         """
         self._cancelled = False
         self._completed_probes = 0
@@ -322,7 +329,7 @@ class AsyncTCPScanner:
 
             return obs
 
-        # Schedule tasks with active tracking
+        # Schedule port discovery tasks
         tasks: list[asyncio.Task[PortObservation]] = []
         for t in active_targets:
             for p in port_list:
@@ -341,6 +348,38 @@ class AsyncTCPScanner:
                 else:
                     logger.error("Unexpected worker gather exception: %s", res)
                     counts[PortState.ERROR] += 1
+
+        # Phase 2: Service Fingerprinting on Discovered Open Ports
+        if not self._cancelled and self.config.fingerprint_services:
+            open_observations = [r for r in results if r.state == PortState.OPEN]
+            if open_observations:
+                if self.config.use_nmap and self.nmap_adapter.is_available():
+                    logger.info("Running Nmap adapter for %d open ports...", len(open_observations))
+                    try:
+                        unique_ips = list({obs.target_ip for obs in open_observations})
+                        unique_ports = list({obs.port for obs in open_observations})
+                        nmap_results = await self.nmap_adapter.scan_services(
+                            targets=unique_ips,
+                            ports=unique_ports,
+                            timeout=self.config.timeout_seconds * len(unique_ports) + 10.0,
+                        )
+                        nmap_map = {(ip, p): fp for ip, p, fp in nmap_results}
+                        for obs in open_observations:
+                            if (obs.target_ip, obs.port) in nmap_map:
+                                obs.service = nmap_map[(obs.target_ip, obs.port)]
+                    except Exception as err:
+                        logger.warning(
+                            "Nmap adapter failed, falling back to internal probes: %s", err
+                        )
+
+                # For any open observation without a service yet, run internal ServiceDetector
+                for obs in open_observations:
+                    if obs.service is None:
+                        obs.service = await self.service_detector.identify_service(
+                            ip=obs.target_ip,
+                            port=obs.port,
+                            timeout=self.config.timeout_seconds,
+                        )
 
         duration = time.monotonic() - self._start_time
         status = ScanStatus.CANCELLED if self._cancelled else ScanStatus.COMPLETED

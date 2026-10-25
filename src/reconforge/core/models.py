@@ -13,6 +13,7 @@ from reconforge.core.enums import (
     TransportProtocol,
 )
 from reconforge.core.exceptions import InvalidTargetError
+from reconforge.fingerprinting.models import ServiceFingerprint
 from reconforge.utils.network import is_valid_hostname, parse_ip_or_network
 
 
@@ -104,6 +105,9 @@ class PortObservation(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     error_message: str | None = None
     source: str = "internal_tcp_connect"
+    service: ServiceFingerprint | None = Field(
+        default=None, description="Identified service fingerprint if probe was executed."
+    )
 
 
 class HostDiscoveryResult(BaseModel):
@@ -131,6 +135,12 @@ class ScanConfig(BaseModel):
     )
     host_discovery_ports: list[int] = Field(default_factory=lambda: [80, 443, 22, 445])
     max_retries: int = Field(default=0, ge=0, le=2)
+    fingerprint_services: bool = Field(
+        default=True, description="Attempt service fingerprinting on discovered open ports."
+    )
+    use_nmap: bool = Field(
+        default=False, description="Use optional Nmap adapter for service fingerprinting."
+    )
 
 
 class ScanProgress(BaseModel):
