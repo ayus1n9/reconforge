@@ -58,3 +58,13 @@
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low).
   - Code formatting & linting: Ruff reported 0 errors, all 22 files formatted.
 - **Next Recommended Action**: Obtain user review and approval for Phase 1; then proceed to Phase 2 (Service Identification, Protocol Probes & Optional Nmap XML Adapter).
+
+## Git & Release Operations (v0.1.0)
+- **Repository**: `https://github.com/ayus1n9/reconforge`
+- **Branch**: `main` (tracking `origin/main`)
+- **Commits**:
+  - `f0b3864` (`chore: initialize ReconForge project structure and safety rules`)
+  - `38ef1c0` (`feat(scanner): implement bounded asynchronous TCP discovery and scope engine`)
+- **Tags Created & Pushed**: `v0.1.0`
+- **GitHub Release**: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.1.0`
+- **Working Tree**: Clean.
