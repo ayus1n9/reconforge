@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import platform
 from typing import Annotated
 
@@ -24,14 +25,33 @@ from reconforge.core.models import (
 from reconforge.core.scope import ScopeManager
 from reconforge.discovery.dns_resolver import DNSResolver
 from reconforge.discovery.tcp_scanner import AsyncTCPScanner
+from reconforge.inventory.repository import AssetRepository
+from reconforge.inventory.snapshot import SnapshotManager
+from reconforge.storage.database import DatabaseManager
 from reconforge.utils.logging import setup_logging
 from reconforge.utils.network import parse_ports
+
+logger = logging.getLogger("reconforge.cli")
 
 app = typer.Typer(
     name="reconforge",
     help="ReconForge: Intelligent Network Attack-Surface Mapping & Exposure Assessment Platform.",
     add_completion=False,
 )
+assets_app = typer.Typer(
+    name="assets", help="Manage inventoried network assets and exposed services."
+)
+assessments_app = typer.Typer(
+    name="assessments", help="Inspect historical security assessment runs."
+)
+snapshot_app = typer.Typer(
+    name="snapshot", help="Export and import validated assessment snapshots."
+)
+
+app.add_typer(assets_app)
+app.add_typer(assessments_app)
+app.add_typer(snapshot_app)
+
 console = Console()
 
 
@@ -94,6 +114,13 @@ def scan(
         bool,
         typer.Option("--use-nmap", help="Use optional local Nmap service scan integration."),
     ] = False,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save/--no-save",
+            help="Persist assessment, assets, and services into inventory database.",
+        ),
+    ] = True,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Confirm execution without interactive prompt.")
     ] = False,
@@ -216,7 +243,22 @@ def scan(
             scanner.cancel()
             raise typer.Exit(code=130) from err
 
-    # 5. Output Presentation
+    # 5. Persistent Inventory Recording (Phase 3)
+    if save and summary.status != "cancelled":
+        try:
+            db_mgr = DatabaseManager()
+            repo = AssetRepository(db_mgr)
+            repo.record_scan_results(
+                assessment_id=summary.scan_id,
+                scope_config=scope.model_dump(),
+                scanner_version=__version__,
+                observations=observations,
+                summary=summary,
+            )
+        except Exception as save_err:
+            logger.warning("Failed to persist scan results to inventory database: %s", save_err)
+
+    # 6. Output Presentation
     if json_output:
         out = {
             "summary": summary.model_dump(),
@@ -268,7 +310,6 @@ def scan(
             f"{obs.response_time_ms:.1f}" if obs.response_time_ms else "-",
         )
 
-    # If verbose, display closed/timeout/filtered rows
     if verbose:
         for obs in other_obs:
             state_color = {
@@ -304,6 +345,196 @@ def scan(
         border_style="green" if summary.status == "completed" else "yellow",
     )
     console.print(summary_panel)
+
+
+@assets_app.command("list")
+def list_assets_cmd(
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum assets to return.")] = 50,
+) -> None:
+    """List all inventoried network assets and their exposed services."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    assets = repo.list_assets(limit=limit)
+
+    if not assets:
+        console.print(
+            "[dim]No assets recorded in inventory yet. Run 'reconforge scan' to populate.[/dim]"
+        )
+        return
+
+    table = Table(title="ReconForge Asset Inventory", border_style="cyan")
+    table.add_column("Asset ID", style="dim")
+    table.add_column("IP Address", style="bold")
+    table.add_column("Hostnames", style="dim")
+    table.add_column("Exposed Services", style="cyan")
+    table.add_column("Criticality", justify="center")
+    table.add_column("Last Seen", style="italic")
+
+    for asset in assets:
+        services_summary = []
+        for s in asset.services:
+            srv_desc = f"{s.port}/{s.protocol} ({s.service_name})"
+            if s.product:
+                srv_desc += f": {s.product}"
+            services_summary.append(srv_desc)
+
+        services_str = ", ".join(services_summary) if services_summary else "[dim]None open[/dim]"
+        hostnames_str = ", ".join(asset.observed_hostnames) if asset.observed_hostnames else "-"
+        last_seen = asset.last_observed_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        table.add_row(
+            asset.id[:8],
+            asset.ip_address,
+            hostnames_str,
+            services_str,
+            asset.criticality.upper(),
+            last_seen,
+        )
+
+    console.print(table)
+
+
+@assets_app.command("show")
+def show_asset_cmd(
+    asset_id_or_ip: Annotated[
+        str, typer.Argument(help="UUID or IP address of the asset to inspect.")
+    ],
+) -> None:
+    """Display comprehensive details and service inventory for a specific asset."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    asset = repo.get_asset(asset_id_or_ip)
+
+    if not asset:
+        console.print(f"[bold red]Asset '{asset_id_or_ip}' not found in inventory.[/bold red]")
+        raise typer.Exit(code=1)
+
+    panel_text = (
+        f"[bold]Asset ID:[/bold] {asset.id}\n"
+        f"[bold]IP Address:[/bold] {asset.ip_address} ({asset.address_family})\n"
+        f"[bold]Hostnames:[/bold] {', '.join(asset.observed_hostnames) if asset.observed_hostnames else 'None'}\n"
+        f"[bold]Type:[/bold] {asset.asset_type}  |  [bold]Criticality:[/bold] {asset.criticality.upper()}\n"
+        f"[bold]First Observed:[/bold] {asset.first_observed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+        f"[bold]Last Observed:[/bold] {asset.last_observed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+        f"[bold]Discovery Sources:[/bold] {', '.join(asset.discovery_sources or [])}"
+    )
+    console.print(
+        Panel(panel_text, title=f"Asset Profile: {asset.ip_address}", border_style="cyan")
+    )
+
+    table = Table(title=f"Discovered Services ({len(asset.services)})", border_style="dim")
+    table.add_column("Port", justify="right")
+    table.add_column("Proto", justify="center")
+    table.add_column("Service", style="cyan")
+    table.add_column("Product", style="green")
+    table.add_column("Version", style="bold yellow")
+    table.add_column("Confidence", justify="center")
+    table.add_column("Banner / Extra Info")
+
+    for s in asset.services:
+        banner = s.banner_snippet or "-"
+        if s.tls_metadata:
+            proto = s.tls_metadata.get("protocol_version") or "TLS"
+            cipher = s.tls_metadata.get("cipher_suite") or ""
+            banner = f"TLS: {proto} ({cipher}) | {banner}"
+        table.add_row(
+            str(s.port),
+            s.protocol.upper(),
+            s.service_name,
+            s.product or "-",
+            s.version or "-",
+            s.confidence.upper(),
+            banner,
+        )
+
+    console.print(table)
+
+
+@assessments_app.command("list")
+def list_assessments_cmd(
+    limit: Annotated[
+        int, typer.Option("--limit", "-l", help="Maximum assessments to return.")
+    ] = 50,
+) -> None:
+    """List historical assessment runs and execution statistics."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    assessments = repo.list_assessments(limit=limit)
+
+    if not assessments:
+        console.print("[dim]No assessments recorded yet.[/dim]")
+        return
+
+    table = Table(title="Assessment History", border_style="green")
+    table.add_column("Assessment ID", style="dim")
+    table.add_column("Name", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Targets", justify="right")
+    table.add_column("Probes", justify="right")
+    table.add_column("Open Ports", justify="right")
+    table.add_column("Started At", style="italic")
+
+    for a in assessments:
+        cov = a.coverage_metrics or {}
+        targets_num = str(cov.get("targets_assessed", "-"))
+        probes_num = str(cov.get("probes_attempted", "-"))
+        open_num = str(cov.get("open_count", "-"))
+        start_str = a.start_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        status_color = "green" if a.status == "completed" else "yellow"
+        table.add_row(
+            a.id[:8],
+            a.name,
+            f"[{status_color}]{a.status.upper()}[/{status_color}]",
+            targets_num,
+            probes_num,
+            open_num,
+            start_str,
+        )
+
+    console.print(table)
+
+
+@snapshot_app.command("export")
+def export_snapshot_cmd(
+    assessment_id: Annotated[str, typer.Argument(help="UUID of the assessment to export.")],
+    output: Annotated[
+        str | None, typer.Option("--output", "-o", help="File path to save snapshot JSON.")
+    ] = None,
+) -> None:
+    """Export an assessment snapshot to a versioned JSON file."""
+    db_mgr = DatabaseManager()
+    manager = SnapshotManager(db_mgr)
+    try:
+        data = manager.export_snapshot(assessment_id)
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(data)
+            console.print(f"[bold green]Snapshot successfully exported to {output}[/bold green]")
+        else:
+            console.print(data)
+    except Exception as err:
+        console.print(f"[bold red]Export Error:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+
+@snapshot_app.command("import")
+def import_snapshot_cmd(
+    file_path: Annotated[str, typer.Argument(help="Path to snapshot JSON file to import.")],
+) -> None:
+    """Import and validate an untrusted assessment snapshot JSON file into the database."""
+    db_mgr = DatabaseManager()
+    manager = SnapshotManager(db_mgr)
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            content = f.read()
+        assessment = manager.import_snapshot(content)
+        console.print(
+            f"[bold green]Snapshot successfully imported! Assessment ID: {assessment.id} ({assessment.name})[/bold green]"
+        )
+    except Exception as err:
+        console.print(f"[bold red]Snapshot Import Failed:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
 
 
 @app.command()

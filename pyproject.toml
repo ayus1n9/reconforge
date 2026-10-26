@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reconforge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Intelligent Network Attack-Surface Mapping, Exposure Assessment & Security Intelligence Platform"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,7 @@ dependencies = [
     "rich>=13.7.0",
     "pyyaml>=6.0.1",
     "defusedxml>=0.7.1",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.optional-dependencies]
