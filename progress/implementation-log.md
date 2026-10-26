@@ -115,4 +115,53 @@
   - Test suite expanded to 42 tests across unit, integration, and security boundaries. All 42 tests passed.
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low).
   - Code formatting & linting: Ruff reported 0 errors, 38 files verified.
-- **Next Recommended Action**: Obtain user review and approval for Phase 2; then proceed to Phase 3 (Normalized Asset Inventory & Data Model).
+- **Git & Release Operations (v0.2.0)**:
+  - Commit: `96dafc4` (`feat(fingerprinting): implement modular service identification, TLS metadata inspection, and hardened Nmap adapter`)
+  - Tag: `v0.2.0`
+  - GitHub Release: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.2.0`
+
+## Phase 3: Normalized Asset Inventory & Data Model
+- **Status**: COMPLETE (Awaiting User Review / Approval for Phase 4)
+- **Implemented Features**:
+  - `DatabaseManager`: Zero-dependency SQLite management with WAL journal mode, strict foreign key integrity, and atomic session context manager. Configured `StaticPool` for in-memory SQLite instances.
+  - Relational ORM models (`AssetRecord`, `ServiceRecord`, `AssessmentRecord`, `FindingRecord`) with JSON fields and UTC timezone-aware timestamps.
+  - Asset Repository (`AssetRepository`):
+    - Normalized IP-based asset identity ensuring distinct IPs sharing a hostname are never conflated into a single record.
+    - Composite unique constraint `(asset_id, port, protocol)` on services.
+    - Confidence elevation allowing higher-fidelity probes to upgrade service metadata without duplicate entries.
+    - Atomic recording of scan results and multi-target observations.
+    - UUID and UUID-prefix lookups for assets and assessments.
+  - Assessment Snapshot Engine (`SnapshotManager`):
+    - Export and import of full assessment runs with inventoried assets, services, and findings.
+    - Untrusted input defense: Pydantic schema validation rejecting invalid IPs, out-of-range ports, and malformed JSON.
+    - Sanitization of ANSI escape sequences and null bytes in service banners.
+  - CLI commands for asset inventory and snapshots:
+    - `reconforge assets list`: Tabular overview of assets and services.
+    - `reconforge assets show <id_or_ip>`: Detailed panel inspection with service history.
+    - `reconforge assessments list`: Assessment run history.
+    - `reconforge snapshot export <assessment_id> [--output file]`: JSON snapshot export.
+    - `reconforge snapshot import <snapshot_path>`: Validated snapshot ingestion.
+    - Auto-persistence in `reconforge scan` (with `--save/--no-save`).
+- **Files Created**:
+  - `src/reconforge/storage/__init__.py`
+  - `src/reconforge/storage/database.py`
+  - `src/reconforge/storage/models.py`
+  - `src/reconforge/inventory/__init__.py`
+  - `src/reconforge/inventory/repository.py`
+  - `src/reconforge/inventory/snapshot.py`
+  - `tests/unit/test_repository.py`
+  - `tests/unit/test_snapshots.py`
+  - `tests/security/test_snapshot_untrusted_import.py`
+- **Files Modified**:
+  - `pyproject.toml` (version 0.3.0, added `sqlalchemy>=2.0.0`)
+  - `CHANGELOG.md` (documented v0.3.0 changes)
+  - `src/reconforge/__init__.py` (bumped to 0.3.0)
+  - `src/reconforge/cli.py` (added inventory subcommands and scan persistence)
+  - `progress/decisions.md` (added ADR-008 and ADR-009)
+  - `progress/validation-results.md`
+- **Validation**:
+  - 53/53 tests passed (11 new tests for repository, snapshots, and security validation).
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low).
+  - Code formatting & linting: Ruff reported 0 errors, 47 files verified.
+- **Next Recommended Action**: Obtain user review and approval for Phase 3; then proceed to Phase 4 (Rule-based Exposure Assessment Engine).
+

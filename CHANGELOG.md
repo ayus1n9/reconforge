@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-26
+
+### Added
+- **Normalized Asset Inventory & Relational Data Model**:
+  - `DatabaseManager`: SQLite storage engine configured with `PRAGMA foreign_keys=ON;`, `PRAGMA synchronous=NORMAL;`, and `PRAGMA journal_mode=WAL;` for atomic concurrency and relational referential integrity.
+  - Relational schema with SQLAlchemy 2.0 ORM:
+    - `AssetRecord`: Normalized network asset keyed by canonical IP address; tracks hostnames (JSON array), asset type, discovery sources, and monotonic UTC observation timestamps (`first_observed_at`, `last_observed_at`).
+    - `ServiceRecord`: Normalized exposed network service with composite unique constraint `uq_asset_port_proto` (`asset_id`, `port`, `protocol`), confidence elevation, banner snippet sanitization, and candidate CPEs.
+    - `AssessmentRecord`: Security assessment run metadata tracking execution parameters, scanner version, run state, and aggregate probe coverage metrics.
+    - `FindingRecord`: Traceable security finding schema tracking rule ID, severity, state, confidence, title, description, and remediation guidance.
+  - `AssetRepository`: Domain repository ensuring assets are indexed strictly by IP address without merging separate hosts sharing a domain or CNAME, providing atomic scan recording and history retrieval.
+- **Assessment Snapshot Engine (`SnapshotManager`)**:
+  - Full versioned export of assessment scopes, assets, services, and findings into schema-validated JSON (`AssessmentSnapshot`).
+  - Strict Pydantic ingestion validation: rejects malformed JSON, out-of-range ports, and unvalidated IP strings (preventing SQL and command injection).
+  - Terminal escape sequence stripping and null-byte sanitization on all imported banner text.
+- **Enhanced CLI Commands**:
+  - `reconforge assets list`: Rich tabular display of inventoried assets, exposed ports, criticality, and last seen timestamps.
+  - `reconforge assets show <id_or_ip>`: Detailed panel inspection for a single asset with full service history and banner details. Supports UUID prefix matching.
+  - `reconforge assessments list`: Chronological list of historical assessment runs, status, and open port counts.
+  - `reconforge snapshot export <assessment_id> [--output file]`: Export versioned JSON assessment snapshots.
+  - `reconforge snapshot import <snapshot_path>`: Validate and ingest untrusted assessment snapshots with full referential integrity.
+  - Automatic scan persistence: `reconforge scan` automatically saves assessment and discovered services into the inventory database unless `--no-save` is specified.
+- **Testing & Security**:
+  - 11 new tests added (53 total passing tests) covering repository identity separation, timestamp monotonicity, confidence elevation, snapshot round-trip, and untrusted import injection resistance.
+  - Bandit static security scan clean (0 issues across 3,131 LOC).
+  - Ruff formatting and linting 100% verified.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

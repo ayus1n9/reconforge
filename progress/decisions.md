@@ -75,3 +75,25 @@
   - Enforce subprocess execution timeout and 10 MB maximum stdout buffer limit.
   - Parse XML output strictly using `defusedxml` to block external entity resolution (XXE) and recursive entity expansion bombs (Billion Laughs).
 - **Consequences**: Secure and robust optional integration of established third-party scanning tools.
+
+## ADR-008: Normalized Asset Identity by IP Address
+- **Date**: 2026-10-26
+- **Status**: ACCEPTED
+- **Context**: In network attack-surface mapping, multiple distinct IP addresses frequently resolve from a single hostname (e.g., DNS round-robin, load balancers, CDNs), and a single IP may host multiple virtual hosts. Collapsing assets by hostname causes inventory corruption, while keying purely on arbitrary strings loses referential integrity.
+- **Decision**:
+  - Assets are uniquely keyed and identified in the repository and database by canonical IP address (`AssetRecord.ip_address`).
+  - Observed hostnames are stored as an array associated with that IP address (`observed_hostnames`), never merged across different IP addresses.
+  - Services are uniquely constrained by `(asset_id, port, protocol)`.
+- **Consequences**: Deterministic, corruption-free inventory tracking across repeated assessment cycles.
+
+## ADR-009: Strict Untrusted Snapshot Ingestion Defenses
+- **Date**: 2026-10-26
+- **Status**: ACCEPTED
+- **Context**: Importing snapshot JSON files from untrusted environments or third-party operators can be an attack vector for SQL injection, buffer overruns, command injection, terminal ANSI escape pollution, or schema degradation.
+- **Decision**:
+  - All incoming snapshot documents must pass rigorous Pydantic schema validation (`AssessmentSnapshot`, `SnapshotAsset`, `SnapshotService`).
+  - IP addresses are strictly validated with `parse_ip_or_network()` to ensure valid IPv4/IPv6 addresses.
+  - Ports are bounded by `ge=1, le=65535`.
+  - Service banners are stripped of ANSI escape sequences (`\x1b`), control characters, and null bytes before database insertion.
+  - Snapshot schema versions are enforced, rejecting mismatched or unsupported formats.
+- **Consequences**: Safe offline sharing and archiving of assessment data without compromising the host or database.
