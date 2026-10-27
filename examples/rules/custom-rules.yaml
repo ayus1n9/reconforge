@@ -1,0 +1,40 @@
+# ReconForge Custom Declarative Exposure Rules
+- id: EXP-CUSTOM-GRAPHQL
+  name: Exposed GraphQL Introspection Endpoint
+  description: >
+    GraphQL API listener detected with introspection queries potentially enabled.
+    Introspection exposes full schema definitions, field types, and internal mutations
+    to unauthorized actors.
+  severity: medium
+  category: insecure_management
+  default_state: potential_exposure
+  conditions:
+    ports: [4000, 8000, 8080]
+    service_names: ["http", "https"]
+    banner_pattern: "(?i)graphql"
+    require_all: false
+  remediation: >
+    Disable schema introspection in production deployments of GraphQL engines
+    (e.g., Apollo Server, Hasura, GraphQL-Java).
+  references:
+    - "OWASP API Security Top 10: API7:2023 Security Misconfiguration"
+  tags: ["api", "graphql", "custom"]
+
+- id: EXP-CUSTOM-ACTUATOR
+  name: Spring Boot Actuator Endpoints Exposed
+  description: >
+    Spring Boot Actuator administrative endpoints exposed. Sensitive monitoring and heap dump
+    endpoints can leak environment variables, memory contents, and internal credentials.
+  severity: high
+  category: insecure_management
+  default_state: potential_exposure
+  conditions:
+    ports: [8080, 8081, 9000]
+    banner_pattern: "(?i)actuator"
+    require_all: false
+  remediation: >
+    Disable sensitive actuator endpoints in 'application.properties'
+    ('management.endpoints.web.exposure.exclude=*') or restrict access via Spring Security.
+  references:
+    - "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor"
+  tags: ["spring-boot", "actuator", "custom"]

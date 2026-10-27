@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from reconforge.core.enums import PortState
 from reconforge.core.models import PortObservation, ScanSummary
 from reconforge.storage.database import DatabaseManager
-from reconforge.storage.models import AssessmentRecord, AssetRecord, ServiceRecord
+from reconforge.storage.models import AssessmentRecord, AssetRecord, FindingRecord, ServiceRecord
 
 logger = logging.getLogger("reconforge.inventory.repo")
 
@@ -294,3 +294,65 @@ class AssetRepository:
                 .offset(offset)
             )
             return list(session.execute(stmt).scalars().all())
+
+    def list_findings(
+        self,
+        assessment_id: str | None = None,
+        asset_id: str | None = None,
+        severity: str | None = None,
+        state: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[FindingRecord]:
+        """List findings matching optional filter criteria with eager-loaded asset and service."""
+        with self.db.session() as session:
+            stmt = (
+                select(FindingRecord)
+                .options(selectinload(FindingRecord.asset), selectinload(FindingRecord.service))
+                .order_by(FindingRecord.created_at.desc())
+            )
+            if assessment_id:
+                stmt = stmt.where(
+                    (FindingRecord.assessment_id == assessment_id)
+                    | (FindingRecord.assessment_id.startswith(assessment_id))
+                )
+            if asset_id:
+                stmt = stmt.where(
+                    (FindingRecord.asset_id == asset_id)
+                    | (FindingRecord.asset_id.startswith(asset_id))
+                )
+            if severity:
+                stmt = stmt.where(FindingRecord.severity == severity.lower())
+            if state:
+                stmt = stmt.where(FindingRecord.state == state.lower())
+
+            stmt = stmt.limit(limit).offset(offset)
+            return list(session.execute(stmt).scalars().all())
+
+    def get_finding(self, finding_id: str) -> FindingRecord | None:
+        """Retrieve finding by UUID or UUID prefix with eager-loaded relationships."""
+        with self.db.session() as session:
+            stmt = (
+                select(FindingRecord)
+                .options(
+                    selectinload(FindingRecord.assessment),
+                    selectinload(FindingRecord.asset),
+                    selectinload(FindingRecord.service),
+                )
+                .where((FindingRecord.id == finding_id) | (FindingRecord.id.startswith(finding_id)))
+            )
+            return session.execute(stmt).scalars().first()
+
+    def update_finding_state(self, finding_id: str, new_state: str) -> FindingRecord | None:
+        """Update finding state (e.g. false_positive, accepted_risk) and bump updated_at timestamp."""
+        with self.db.session() as session:
+            stmt = select(FindingRecord).where(
+                (FindingRecord.id == finding_id) | (FindingRecord.id.startswith(finding_id))
+            )
+            finding = session.execute(stmt).scalars().first()
+            if finding:
+                finding.state = new_state.lower()
+                finding.updated_at = datetime.now(UTC)
+                session.flush()
+                session.refresh(finding)
+            return finding

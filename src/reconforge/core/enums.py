@@ -70,3 +70,37 @@ class ObservationConfidence(StrEnum):
 
     UNKNOWN = "unknown"
     """Port state confirmed but service or application identity is unverified."""
+
+
+class SeverityLevel(StrEnum):
+    """Normalized exposure and vulnerability severity classifications."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFORMATIONAL = "info"
+
+
+class FindingState(StrEnum):
+    """Defensible lifecycle state of an exposure or security finding."""
+
+    INFORMATIONAL = "informational"
+    POTENTIAL_EXPOSURE = "potential_exposure"
+    POTENTIAL_VULNERABILITY = "potential_vulnerability"
+    CONFIRMED = "confirmed"
+    FALSE_POSITIVE = "false_positive"
+    ACCEPTED_RISK = "accepted_risk"
+    NEEDS_REVIEW = "needs_review"
+
+
+class FindingCategory(StrEnum):
+    """Categorical classification of exposure rules and security findings."""
+
+    CLEARTEXT_PROTOCOL = "cleartext_protocol"
+    DATABASE_EXPOSURE = "database_exposure"
+    INSECURE_MANAGEMENT = "insecure_management"
+    TLS_CONFIGURATION = "tls_configuration"
+    INFORMATION_DISCLOSURE = "information_disclosure"
+    NETWORK_EXPOSURE = "network_exposure"
+    MISCONFIGURATION = "misconfiguration"

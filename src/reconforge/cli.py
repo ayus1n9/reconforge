@@ -14,6 +14,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 
 from reconforge import __version__
+from reconforge.assessment.custom_rules import RuleLoadingError, load_rules_from_file
+from reconforge.assessment.engine import ExposureEngine
 from reconforge.core.enums import ObservationConfidence, PortState
 from reconforge.core.exceptions import ScopeViolationError
 from reconforge.core.models import (
@@ -47,12 +49,34 @@ assessments_app = typer.Typer(
 snapshot_app = typer.Typer(
     name="snapshot", help="Export and import validated assessment snapshots."
 )
+findings_app = typer.Typer(
+    name="findings", help="Inspect and manage identified security exposures and findings."
+)
+rules_app = typer.Typer(
+    name="rules", help="Inspect and validate declarative exposure assessment rules."
+)
 
 app.add_typer(assets_app)
 app.add_typer(assessments_app)
 app.add_typer(snapshot_app)
+app.add_typer(findings_app)
+app.add_typer(rules_app)
 
 console = Console()
+
+
+def format_severity(severity: str) -> str:
+    """Format finding severity rating with appropriate terminal styling."""
+    s = severity.lower()
+    if s == "critical":
+        return "[bold white on red] CRITICAL [/bold white on red]"
+    elif s == "high":
+        return "[bold red]HIGH[/bold red]"
+    elif s == "medium":
+        return "[bold yellow]MEDIUM[/bold yellow]"
+    elif s == "low":
+        return "[bold blue]LOW[/bold blue]"
+    return "[cyan]INFO[/cyan]"
 
 
 @app.command()
@@ -119,6 +143,13 @@ def scan(
         typer.Option(
             "--save/--no-save",
             help="Persist assessment, assets, and services into inventory database.",
+        ),
+    ] = True,
+    assess: Annotated[
+        bool,
+        typer.Option(
+            "--assess/--no-assess",
+            help="Evaluate declarative exposure rules on discovered services.",
         ),
     ] = True,
     yes: Annotated[
@@ -243,7 +274,8 @@ def scan(
             scanner.cancel()
             raise typer.Exit(code=130) from err
 
-    # 5. Persistent Inventory Recording (Phase 3)
+    # 5. Persistent Inventory Recording & Exposure Assessment (Phase 3 & 4)
+    findings = []
     if save and summary.status != "cancelled":
         try:
             db_mgr = DatabaseManager()
@@ -255,14 +287,18 @@ def scan(
                 observations=observations,
                 summary=summary,
             )
+            if assess:
+                engine = ExposureEngine()
+                findings = engine.evaluate_assessment(summary.scan_id, db_mgr, persist=True)
         except Exception as save_err:
-            logger.warning("Failed to persist scan results to inventory database: %s", save_err)
+            logger.warning("Failed to persist scan results or assess exposures: %s", save_err)
 
     # 6. Output Presentation
     if json_output:
         out = {
             "summary": summary.model_dump(),
             "observations": [obs.model_dump(mode="json") for obs in observations],
+            "findings": [f.model_dump(mode="json") for f in findings],
         }
         console.print(json.dumps(out, indent=2))
         return
@@ -345,6 +381,33 @@ def scan(
         border_style="green" if summary.status == "completed" else "yellow",
     )
     console.print(summary_panel)
+
+    if findings:
+        f_table = Table(
+            title=f"Identified Exposures & Findings ({len(findings)})",
+            border_style="bold red",
+        )
+        f_table.add_column("Severity", justify="center")
+        f_table.add_column("Rule ID", style="bold")
+        f_table.add_column("Title")
+        f_table.add_column("Target")
+        f_table.add_column("State")
+
+        for f in findings:
+            target = f.evidence.get("ip_address") or "-"
+            if f.evidence.get("port"):
+                target += f":{f.evidence['port']}"
+            f_table.add_row(
+                format_severity(f.severity.value),
+                f.rule_id,
+                f.title,
+                target,
+                f.state.value.upper(),
+            )
+        console.print(f_table)
+        console.print(
+            "[dim]Run 'reconforge findings list' or 'reconforge findings show <id>' for full details and remediation.[/dim]"
+        )
 
 
 @assets_app.command("list")
@@ -534,6 +597,240 @@ def import_snapshot_cmd(
         )
     except Exception as err:
         console.print(f"[bold red]Snapshot Import Failed:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+
+@app.command()
+def assess(
+    assessment_id: Annotated[
+        str, typer.Argument(help="UUID or prefix of historical assessment to evaluate.")
+    ],
+    rules_dir: Annotated[
+        str | None, typer.Option("--rules-dir", "-r", help="Path to custom YAML rules directory.")
+    ] = None,
+) -> None:
+    """Evaluate declarative exposure rules against an assessment's inventoried services."""
+    db_mgr = DatabaseManager()
+    engine = ExposureEngine()
+    if rules_dir:
+        _, errors = engine.load_custom_directory(rules_dir)
+        if errors:
+            for err in errors:
+                console.print(f"[bold yellow]Warning:[/bold yellow] {err}")
+
+    findings = engine.evaluate_assessment(assessment_id, db_mgr, persist=True)
+    if not findings:
+        console.print(
+            f"[bold green]No exposures identified for assessment '{assessment_id}'.[/bold green]"
+        )
+        return
+
+    table = Table(
+        title=f"Assessment Findings: {assessment_id[:8]} ({len(findings)})",
+        border_style="bold red",
+    )
+    table.add_column("Finding ID", style="dim")
+    table.add_column("Severity", justify="center")
+    table.add_column("Rule ID", style="bold")
+    table.add_column("Title")
+    table.add_column("Target")
+    table.add_column("State")
+
+    for f in findings:
+        target = f.evidence.get("ip_address") or "-"
+        if f.evidence.get("port"):
+            target += f":{f.evidence['port']}"
+        table.add_row(
+            f.id[:8],
+            format_severity(f.severity.value),
+            f.rule_id,
+            f.title,
+            target,
+            f.state.value.upper(),
+        )
+    console.print(table)
+    console.print(
+        "[dim]Run 'reconforge findings show <finding_id>' to view complete evidence and remediation playbook.[/dim]"
+    )
+
+
+@findings_app.command("list")
+def list_findings_cmd(
+    assessment_id: Annotated[
+        str | None, typer.Option("--assessment-id", "-a", help="Filter by assessment UUID.")
+    ] = None,
+    asset_id: Annotated[
+        str | None, typer.Option("--asset-id", help="Filter by asset UUID or IP address.")
+    ] = None,
+    severity: Annotated[
+        str | None,
+        typer.Option(
+            "--severity", "-s", help="Filter by severity (critical, high, medium, low, info)."
+        ),
+    ] = None,
+    state: Annotated[
+        str | None,
+        typer.Option(
+            "--state", help="Filter by state (potential_exposure, confirmed, false_positive, etc.)."
+        ),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum findings to return.")] = 100,
+) -> None:
+    """List security findings and exposures with severity badges and target locations."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    findings = repo.list_findings(
+        assessment_id=assessment_id,
+        asset_id=asset_id,
+        severity=severity,
+        state=state,
+        limit=limit,
+    )
+
+    if not findings:
+        console.print("[dim]No security findings match the specified criteria.[/dim]")
+        return
+
+    table = Table(title=f"ReconForge Security Findings ({len(findings)})", border_style="bold red")
+    table.add_column("Finding ID", style="dim")
+    table.add_column("Severity", justify="center")
+    table.add_column("Rule ID", style="bold")
+    table.add_column("Title")
+    table.add_column("Target IP")
+    table.add_column("Port/Svc")
+    table.add_column("State")
+
+    for f in findings:
+        target_ip = f.asset.ip_address if f.asset else "-"
+        port_svc = f"{f.service.port}/{f.service.protocol}" if f.service else "-"
+        table.add_row(
+            f.id[:8],
+            format_severity(f.severity),
+            f.rule_id,
+            f.title,
+            target_ip,
+            port_svc,
+            f.state.upper(),
+        )
+    console.print(table)
+    console.print(
+        "[dim]Use 'reconforge findings show <finding_id>' to inspect finding details.[/dim]"
+    )
+
+
+@findings_app.command("show")
+def show_finding_cmd(
+    finding_id: Annotated[str, typer.Argument(help="UUID or prefix of the finding to inspect.")],
+) -> None:
+    """Inspect comprehensive technical details, evidence, and remediation for a finding."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    finding = repo.get_finding(finding_id)
+
+    if not finding:
+        console.print(f"[bold red]Finding '{finding_id}' not found.[/bold red]")
+        raise typer.Exit(code=1)
+
+    target_info = f"{finding.asset.ip_address}" if finding.asset else "Unknown"
+    if finding.service:
+        target_info += f" (Port {finding.service.port}/{finding.service.protocol}"
+        if finding.service.service_name != "unknown":
+            target_info += f" - {finding.service.service_name}"
+        target_info += ")"
+
+    evidence_json = json.dumps(finding.evidence, indent=2)
+
+    panel_text = (
+        f"[bold]Finding ID:[/bold] {finding.id}\n"
+        f"[bold]Rule ID:[/bold] {finding.rule_id}\n"
+        f"[bold]Severity:[/bold] {format_severity(finding.severity)}    "
+        f"[bold]State:[/bold] [{finding.state.upper()}]\n"
+        f"[bold]Target Asset:[/bold] {target_info}\n"
+        f"[bold]Assessment Run:[/bold] {finding.assessment_id}\n"
+        f"[bold]First Identified:[/bold] {finding.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
+        f"[bold underline]Description:[/bold underline]\n{finding.description}\n\n"
+        f"[bold underline]Evidence:[/bold underline]\n[dim]{evidence_json}[/dim]\n\n"
+        f"[bold underline]Actionable Remediation Guidance:[/bold underline]\n"
+        f"[green]{finding.remediation_guidance or 'No remediation playbook attached.'}[/green]"
+    )
+    console.print(Panel(panel_text, title=f"Security Finding: {finding.title}", border_style="red"))
+
+
+@findings_app.command("update")
+def update_finding_cmd(
+    finding_id: Annotated[str, typer.Argument(help="UUID or prefix of the finding to update.")],
+    state: Annotated[
+        str,
+        typer.Argument(
+            help="New finding state (e.g. 'confirmed', 'false_positive', 'accepted_risk', 'needs_review')."
+        ),
+    ],
+) -> None:
+    """Update lifecycle state of an exposure finding."""
+    db_mgr = DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    updated = repo.update_finding_state(finding_id, state)
+    if not updated:
+        console.print(f"[bold red]Finding '{finding_id}' not found.[/bold red]")
+        raise typer.Exit(code=1)
+    console.print(
+        f"[bold green]Updated finding {updated.id[:8]} state to '{updated.state.upper()}'.[/bold green]"
+    )
+
+
+@rules_app.command("list")
+def list_rules_cmd(
+    category: Annotated[
+        str | None, typer.Option("--category", "-c", help="Filter rules by category.")
+    ] = None,
+    severity: Annotated[
+        str | None, typer.Option("--severity", "-s", help="Filter rules by severity.")
+    ] = None,
+) -> None:
+    """List all registered exposure detection rules."""
+    engine = ExposureEngine()
+    rules = engine.list_rules(category=category, severity=severity)
+
+    table = Table(title=f"Registered Exposure Rules ({len(rules)})", border_style="cyan")
+    table.add_column("Rule ID", style="bold")
+    table.add_column("Severity", justify="center")
+    table.add_column("Category")
+    table.add_column("Rule Name")
+    table.add_column("Ports / Trigger Criteria")
+
+    for r in rules:
+        ports_str = ", ".join(str(p) for p in r.conditions.ports) if r.conditions.ports else "any"
+        if r.conditions.service_names:
+            ports_str += f" ({', '.join(r.conditions.service_names)})"
+        table.add_row(
+            r.id,
+            format_severity(r.severity.value),
+            r.category.value,
+            r.name,
+            ports_str,
+        )
+    console.print(table)
+
+
+@rules_app.command("validate")
+def validate_rules_cmd(
+    rule_path: Annotated[str, typer.Argument(help="Path to YAML rule file to validate.")],
+) -> None:
+    """Validate a custom YAML rule file against the ExposureRuleDefinition schema."""
+    try:
+        rules = load_rules_from_file(rule_path)
+        console.print(
+            f"[bold green]Rule file '{rule_path}' is valid! Loaded {len(rules)} rule(s):[/bold green]"
+        )
+        for r in rules:
+            console.print(
+                f" • [bold cyan]{r.id}[/bold cyan]: {r.name} ({format_severity(r.severity.value)})"
+            )
+    except RuleLoadingError as err:
+        console.print(f"[bold red]Rule Validation Error:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+    except Exception as err:
+        console.print(f"[bold red]Validation Failed:[/bold red] {err}")
         raise typer.Exit(code=1) from err
 
 
