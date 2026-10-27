@@ -97,3 +97,25 @@
   - Service banners are stripped of ANSI escape sequences (`\x1b`), control characters, and null bytes before database insertion.
   - Snapshot schema versions are enforced, rejecting mismatched or unsupported formats.
 - **Consequences**: Safe offline sharing and archiving of assessment data without compromising the host or database.
+
+## ADR-010: Declarative Exposure Rule Engine with Transport Prerequisite Isolation
+- **Date**: 2026-10-27
+- **Status**: ACCEPTED
+- **Context**: Evaluating attack-surface exposures across varying ports and services requires declarative matching rules without hardcoding detection heuristics. Naively evaluating transport protocols (`tcp`/`udp`) as positive matching criteria causes false positives when combined with disjunctive (`require_all=False`) evaluation.
+- **Decision**:
+  - Treat transport protocol (`tcp`, `udp`) strictly as a prerequisite gate rather than an exposure trigger.
+  - Implement declarative rules with structured conditions: `ports`, `service_names`, `products`, `version_pattern`, `banner_pattern`, and `tls_conditions`.
+  - Cap regular expression length at 500 characters and pre-compile with `re.compile()` to block catastrophic backtracking (ReDoS).
+  - Enforce safe YAML parsing via `yaml.safe_load()` and bounded file size limits (1 MB) for user-supplied rule files.
+- **Consequences**: Zero code execution risks, high evaluation throughput, and robust resistance to false positives.
+
+## ADR-011: Defensible Finding Lifecycle States & Evidence Linking
+- **Date**: 2026-10-27
+- **Status**: ACCEPTED
+- **Context**: Port scanning observations should not be conflated with confirmed vulnerabilities or active exploits without empirical proof. Hiring managers and security teams require distinct classifications between exposure, potential vulnerability, and confirmed issue.
+- **Decision**:
+  - Establish explicit finding lifecycle states: `INFORMATIONAL`, `POTENTIAL_EXPOSURE`, `POTENTIAL_VULNERABILITY`, `CONFIRMED`, `FALSE_POSITIVE`, `ACCEPTED_RISK`, `NEEDS_REVIEW`.
+  - Open services on sensitive ports (e.g. Redis on 6379, MySQL on 3306) are classified as `POTENTIAL_EXPOSURE` rather than confirmed vulnerabilities unless direct proof of unauthorized access is observed.
+  - Every finding links back to an evidence payload containing the exact observation parameters (target IP, port, protocol, response latency, banner snippet, and matched criteria).
+- **Consequences**: High-fidelity security intelligence suitable for enterprise SOC triage, compliance auditing, and risk prioritization.
+

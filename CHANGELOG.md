@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-27
+
+### Added
+- **Declarative Exposure Assessment Engine (`ExposureEngine`)**:
+  - Rule evaluation pipeline evaluating discovered open ports, services, banners, and TLS metadata against declarative security rules without active exploitation payloads.
+  - Multi-condition rule matching supporting exact ports, port lists, service names, software product names, version regex patterns, raw banner regex patterns, and cryptographic TLS parameters (`is_expired`, `is_self_signed`, legacy protocol negotiation).
+  - Configurable matching modes (`require_all=True` for strict multi-factor criteria, `require_all=False` for broad exposure heuristics).
+  - Automated finding deduplication based on `(assessment_id, asset_id, service_id, rule_id)`.
+- **Comprehensive Built-In Rulebook (`BUILTIN_RULES`)**:
+  - Cleartext Protocol Rules: Telnet (`EXP-CLEARTEXT-TELNET`), FTP (`EXP-CLEARTEXT-FTP`), HTTP (`EXP-CLEARTEXT-HTTP`).
+  - Database Exposure Rules: Redis (`EXP-DB-REDIS`), MySQL/MariaDB (`EXP-DB-MYSQL`), PostgreSQL (`EXP-DB-POSTGRES`), MongoDB (`EXP-DB-MONGODB`), Elasticsearch (`EXP-DB-ELASTIC`).
+  - Administrative & Dangerous Management Interfaces: SSH (`EXP-MGMT-SSH`), Docker Engine Daemon TCP API (`EXP-MGMT-DOCKER`), Kubernetes Control Plane (`EXP-MGMT-K8S`), VNC (`EXP-MGMT-VNC`), RDP (`EXP-MGMT-RDP`).
+  - Cryptographic & TLS Rules: Expired X.509 certificates (`EXP-TLS-EXPIRED`), Self-signed certificates (`EXP-TLS-SELFSIGNED`), Obsolete TLS protocol versions (`EXP-TLS-LEGACY`).
+  - Information Disclosures: Granular server and OS banner disclosure (`EXP-INFO-BANNER`).
+- **Custom YAML Rule Loader & Validator (`custom_rules.py`)**:
+  - Safe YAML ingestion using `yaml.safe_load` preventing arbitrary code execution.
+  - File size bounds (1 MB maximum per rule file) and regex length limits (500 characters) to mitigate ReDoS and resource exhaustion.
+  - Directory scanning support (`load_rules_from_directory`) with non-terminating warning logging for malformed rules.
+- **Enhanced CLI Commands**:
+  - `reconforge assess <assessment_id> [--rules-dir <path>]`: Evaluate exposure rules against historical or newly imported assessments.
+  - `reconforge findings list [--assessment-id] [--severity] [--state]`: Tabular display of findings with severity badge colors, asset IP, port, and state.
+  - `reconforge findings show <finding_id>`: Detailed panel view displaying title, rule ID, severity badge, state, description, evidence JSON, and actionable remediation guidance.
+  - `reconforge findings update <finding_id> <state>`: Transition finding lifecycle state (`confirmed`, `false_positive`, `accepted_risk`, `needs_review`).
+  - `reconforge rules list [--category] [--severity]`: Tabular overview of registered built-in and custom rules.
+  - `reconforge rules validate <file.yaml>`: Validate user-created YAML rules against schema.
+  - Integrated scan evaluation: `reconforge scan` automatically evaluates exposure rules on open ports by default (controllable via `--assess/--no-assess`).
+- **Testing & Security**:
+  - 16 new automated tests added (69 total passing tests across unit, integration, and security boundaries).
+  - Bandit static security analysis clean (0 issues across 4,399 LOC).
+  - Ruff formatting and linting 100% verified.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

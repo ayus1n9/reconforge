@@ -117,3 +117,42 @@
   - `reconforge snapshot import <file>` -> PASSED (verified round-trip import)
 - **Phase 3 Acceptance Criteria Status**: PASS.
 
+## Phase 4: Rule-based Exposure Assessment Engine
+- **Validation Date**: 2026-10-27
+- **Test Command**: `pytest -v`
+- **Test Results**:
+  - `tests/unit/test_exposure_rules.py::test_builtin_rules_loaded` -> PASSED
+  - `tests/unit/test_exposure_rules.py::test_telnet_exposure_matching` -> PASSED
+  - `tests/unit/test_exposure_rules.py::test_tls_conditions_evaluation` -> PASSED
+  - `tests/unit/test_exposure_rules.py::test_banner_pattern_evaluation` -> PASSED
+  - `tests/unit/test_exposure_rules.py::test_require_all_condition` -> PASSED
+  - `tests/unit/test_exposure_rules.py::test_evaluate_observations_to_findings` -> PASSED
+  - `tests/unit/test_custom_rules.py::test_load_valid_single_rule` -> PASSED
+  - `tests/unit/test_custom_rules.py::test_load_multi_rule_list` -> PASSED
+  - `tests/unit/test_custom_rules.py::test_load_rules_from_directory` -> PASSED
+  - `tests/unit/test_custom_rules.py::test_reject_invalid_port_range` -> PASSED
+  - `tests/unit/test_custom_rules.py::test_filter_rules_by_category_and_severity` -> PASSED
+  - `tests/integration/test_assessment_flow.py::test_assessment_flow_end_to_end` -> PASSED
+  - `tests/security/test_rule_safety.py::test_reject_oversized_regex_pattern` -> PASSED
+  - `tests/security/test_rule_safety.py::test_reject_invalid_regex_syntax` -> PASSED
+  - `tests/security/test_rule_safety.py::test_reject_oversized_rule_file` -> PASSED
+  - `tests/security/test_rule_safety.py::test_block_yaml_code_execution_gadgets` -> PASSED
+  - All 69 tests passed in 1.44s (0 failed).
+- **Static Security Scan**:
+  - Command: `bandit -r src/`
+  - Result: No issues identified (4,399 LOC, 0 issues, High: 0, Medium: 0, Low: 0).
+- **Code Quality & Linter**:
+  - Command: `ruff check . && ruff format --check .`
+  - Result: All checks passed! 56 files verified.
+- **CLI Commands Validation**:
+  - `reconforge version` -> PASSED (v0.4.0)
+  - `reconforge scan 127.0.0.1 -p 22 --fingerprint --yes` -> PASSED (Identified OpenSSH exposure and banner disclosure)
+  - `reconforge assess <assessment_id>` -> PASSED (Rendered findings table)
+  - `reconforge findings list` -> PASSED (Rendered findings with severity badges)
+  - `reconforge findings show <finding_id>` -> PASSED (Rendered full panel with evidence and remediation)
+  - `reconforge findings update <finding_id> accepted_risk` -> PASSED (State updated in DB)
+  - `reconforge rules list` -> PASSED (Rendered registered rules)
+  - `reconforge rules validate examples/rules/custom-rules.yaml` -> PASSED (Validated 2 custom rules)
+- **Phase 4 Acceptance Criteria Status**: PASS.
+
+

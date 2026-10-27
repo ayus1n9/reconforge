@@ -159,9 +159,63 @@
   - `src/reconforge/cli.py` (added inventory subcommands and scan persistence)
   - `progress/decisions.md` (added ADR-008 and ADR-009)
   - `progress/validation-results.md`
+- **Git & Release Operations (v0.3.0)**:
+  - Commits:
+    - `cb6cec3`: `feat(inventory): implement normalized asset repository, SQLite storage, and snapshot management`
+    - `7d0d27a`: `docs: document Phase 3 asset inventory, architecture decisions, and validation results`
+  - Tag: `v0.3.0`
+  - GitHub Release: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.3.0`
+
+## Phase 4: Rule-based Exposure Assessment Engine
+- **Status**: COMPLETE (Awaiting User Review / Approval for Phase 5)
+- **Implemented Features**:
+  - `ExposureEngine`: Declarative evaluation engine matching discovered services, open ports, protocol banners, and TLS configurations against structured exposure rules.
+  - Core Built-in Rulebook (`BUILTIN_RULES`):
+    - Cleartext services: Telnet (`EXP-CLEARTEXT-TELNET`), FTP (`EXP-CLEARTEXT-FTP`), HTTP (`EXP-CLEARTEXT-HTTP`).
+    - Database exposures: Redis (`EXP-DB-REDIS`), MySQL (`EXP-DB-MYSQL`), PostgreSQL (`EXP-DB-POSTGRES`), MongoDB (`EXP-DB-MONGODB`), Elasticsearch (`EXP-DB-ELASTIC`).
+    - Insecure management consoles: SSH (`EXP-MGMT-SSH`), Docker daemon TCP API (`EXP-MGMT-DOCKER`), Kubernetes control plane (`EXP-MGMT-K8S`), VNC (`EXP-MGMT-VNC`), RDP (`EXP-MGMT-RDP`).
+    - Cryptographic & TLS: Expired certificate (`EXP-TLS-EXPIRED`), Self-signed certificate (`EXP-TLS-SELFSIGNED`), Legacy protocol negotiation (`EXP-TLS-LEGACY`).
+    - Information disclosures: Software & OS banner leakage (`EXP-INFO-BANNER`).
+  - Custom YAML Rule Loader (`custom_rules.py`):
+    - Strict validation with Pydantic (`ExposureRuleDefinition`).
+    - Safe parsing with `yaml.safe_load`, 1 MB file size boundary, 500-character regex pattern limits, and ReDoS compilation checks.
+    - Directory scanning (`load_rules_from_directory`) with non-terminating warning reporting.
+  - Relational Finding Persistence & Lifecycle:
+    - Automated deduplication per `(assessment_id, asset_id, service_id, rule_id)`.
+    - Lifecycle states: `INFORMATIONAL`, `POTENTIAL_EXPOSURE`, `POTENTIAL_VULNERABILITY`, `CONFIRMED`, `FALSE_POSITIVE`, `ACCEPTED_RISK`, `NEEDS_REVIEW`.
+    - Extended `AssetRepository` with `list_findings`, `get_finding` (with prefix lookup), and `update_finding_state`.
+  - CLI Commands:
+    - `reconforge scan`: Automatically assesses open ports and prints an exposures table.
+    - `reconforge assess <assessment_id> [--rules-dir <path>]`: Evaluates rules against historical assessments.
+    - `reconforge findings list [--assessment-id] [--severity] [--state]`: Tabular listing with colored severity badges.
+    - `reconforge findings show <finding_id>`: Detailed panel with evidence JSON and remediation playbook.
+    - `reconforge findings update <finding_id> <new_state>`: Update finding state.
+    - `reconforge rules list`: Displays registered rules and trigger criteria.
+    - `reconforge rules validate <file>`: Validates user YAML rule files.
+- **Files Created**:
+  - `src/reconforge/assessment/__init__.py`
+  - `src/reconforge/assessment/models.py`
+  - `src/reconforge/assessment/builtin_rules.py`
+  - `src/reconforge/assessment/custom_rules.py`
+  - `src/reconforge/assessment/engine.py`
+  - `examples/rules/custom-rules.yaml`
+  - `tests/unit/test_exposure_rules.py`
+  - `tests/unit/test_custom_rules.py`
+  - `tests/integration/test_assessment_flow.py`
+  - `tests/security/test_rule_safety.py`
+- **Files Modified**:
+  - `pyproject.toml` (bumped to 0.4.0)
+  - `CHANGELOG.md` (documented v0.4.0 release)
+  - `src/reconforge/__init__.py` (bumped to 0.4.0)
+  - `src/reconforge/core/enums.py` (added SeverityLevel, FindingState, FindingCategory)
+  - `src/reconforge/inventory/repository.py` (added finding CRUD and state transitions)
+  - `src/reconforge/cli.py` (added assess, findings, and rules CLI commands)
+  - `progress/decisions.md` (added ADR-010 and ADR-011)
+  - `progress/validation-results.md`
 - **Validation**:
-  - 53/53 tests passed (11 new tests for repository, snapshots, and security validation).
-  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low).
-  - Code formatting & linting: Ruff reported 0 errors, 47 files verified.
-- **Next Recommended Action**: Obtain user review and approval for Phase 3; then proceed to Phase 4 (Rule-based Exposure Assessment Engine).
+  - Test suite expanded to 69 tests across unit, integration, and security boundaries. All 69 tests passed.
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 4,399 LOC.
+  - Code formatting & linting: Ruff reported 0 errors, 56 files verified.
+- **Next Recommended Action**: Obtain user review and approval for Phase 4; then proceed to Phase 5 (Vulnerability Intelligence & CVE Correlation Engine).
+
 
