@@ -104,3 +104,4 @@ class FindingCategory(StrEnum):
     INFORMATION_DISCLOSURE = "information_disclosure"
     NETWORK_EXPOSURE = "network_exposure"
     MISCONFIGURATION = "misconfiguration"
+    VULNERABILITY = "vulnerability"

@@ -5,7 +5,9 @@ from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -150,4 +152,28 @@ class FindingRecord(Base):
     asset: Mapped["AssetRecord"] = relationship("AssetRecord", back_populates="findings")
     service: Mapped["ServiceRecord | None"] = relationship(
         "ServiceRecord", back_populates="findings"
+    )
+
+
+class CVECacheRecord(Base):
+    """Local cache table for Common Vulnerabilities and Exposures (CVE) intelligence."""
+
+    __tablename__ = "cve_cache"
+
+    cve_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    cvss_v3_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cvss_v3_vector: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    severity: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    cwe_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    affected_cpes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    version_criteria: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    references: Mapped[list[str]] = mapped_column(JSON, default=list)
+    published_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_modified_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_known_exploited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

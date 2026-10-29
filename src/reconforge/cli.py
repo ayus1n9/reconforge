@@ -16,7 +16,7 @@ from rich.table import Table
 from reconforge import __version__
 from reconforge.assessment.custom_rules import RuleLoadingError, load_rules_from_file
 from reconforge.assessment.engine import ExposureEngine
-from reconforge.core.enums import ObservationConfidence, PortState
+from reconforge.core.enums import ObservationConfidence, PortState, SeverityLevel
 from reconforge.core.exceptions import ScopeViolationError
 from reconforge.core.models import (
     ScanConfig,
@@ -27,6 +27,9 @@ from reconforge.core.models import (
 from reconforge.core.scope import ScopeManager
 from reconforge.discovery.dns_resolver import DNSResolver
 from reconforge.discovery.tcp_scanner import AsyncTCPScanner
+from reconforge.intelligence.builtin_cves import BUILTIN_CVES
+from reconforge.intelligence.cache import VulnerabilityCache
+from reconforge.intelligence.correlator import VulnerabilityCorrelator
 from reconforge.inventory.repository import AssetRepository
 from reconforge.inventory.snapshot import SnapshotManager
 from reconforge.storage.database import DatabaseManager
@@ -55,12 +58,14 @@ findings_app = typer.Typer(
 rules_app = typer.Typer(
     name="rules", help="Inspect and validate declarative exposure assessment rules."
 )
+cve_app = typer.Typer(name="cve", help="Vulnerability intelligence and CVE correlation engine.")
 
 app.add_typer(assets_app)
 app.add_typer(assessments_app)
 app.add_typer(snapshot_app)
 app.add_typer(findings_app)
 app.add_typer(rules_app)
+app.add_typer(cve_app)
 
 console = Console()
 
@@ -77,6 +82,18 @@ def format_severity(severity: str) -> str:
     elif s == "low":
         return "[bold blue]LOW[/bold blue]"
     return "[cyan]INFO[/cyan]"
+
+
+def format_match_level(match_level: str) -> str:
+    """Format calibrated CVE match level with distinct terminal styling."""
+    m = match_level.lower()
+    if m == "strong_candidate":
+        return "[bold green]STRONG CANDIDATE[/bold green]"
+    elif m == "manual_verification_required":
+        return "[bold yellow]MANUAL VERIFICATION REQUIRED[/bold yellow]"
+    elif m == "possible_match":
+        return "[magenta]POSSIBLE MATCH[/magenta]"
+    return "[dim]INSUFFICIENT EVIDENCE[/dim]"
 
 
 @app.command()
@@ -152,6 +169,13 @@ def scan(
             help="Evaluate declarative exposure rules on discovered services.",
         ),
     ] = True,
+    correlate_cves: Annotated[
+        bool,
+        typer.Option(
+            "--correlate-cves",
+            help="Correlate identified services against vulnerability intelligence and record CVE findings.",
+        ),
+    ] = False,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Confirm execution without interactive prompt.")
     ] = False,
@@ -290,15 +314,37 @@ def scan(
             if assess:
                 engine = ExposureEngine()
                 findings = engine.evaluate_assessment(summary.scan_id, db_mgr, persist=True)
+            if correlate_cves:
+                correlator = VulnerabilityCorrelator(cache=VulnerabilityCache(db_mgr))
+                correlator.correlate_assessment_services(
+                    summary.scan_id, repo, record_findings=True, online=False
+                )
+                findings = repo.list_findings(assessment_id=summary.scan_id)
         except Exception as save_err:
             logger.warning("Failed to persist scan results or assess exposures: %s", save_err)
 
     # 6. Output Presentation
     if json_output:
+        findings_json = []
+        for f in findings:
+            if hasattr(f, "model_dump"):
+                findings_json.append(f.model_dump(mode="json"))
+            else:
+                findings_json.append(
+                    {
+                        "id": f.id,
+                        "rule_id": f.rule_id,
+                        "cve_id": f.cve_id,
+                        "title": f.title,
+                        "severity": f.severity,
+                        "state": f.state,
+                        "evidence": f.evidence,
+                    }
+                )
         out = {
             "summary": summary.model_dump(),
             "observations": [obs.model_dump(mode="json") for obs in observations],
-            "findings": [f.model_dump(mode="json") for f in findings],
+            "findings": findings_json,
         }
         console.print(json.dumps(out, indent=2))
         return
@@ -397,12 +443,14 @@ def scan(
             target = f.evidence.get("ip_address") or "-"
             if f.evidence.get("port"):
                 target += f":{f.evidence['port']}"
+            sev_str = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            state_str = f.state.value if hasattr(f.state, "value") else str(f.state)
             f_table.add_row(
-                format_severity(f.severity.value),
+                format_severity(sev_str),
                 f.rule_id,
                 f.title,
                 target,
-                f.state.value.upper(),
+                state_str.upper(),
             )
         console.print(f_table)
         console.print(
@@ -832,6 +880,259 @@ def validate_rules_cmd(
     except Exception as err:
         console.print(f"[bold red]Validation Failed:[/bold red] {err}")
         raise typer.Exit(code=1) from err
+
+
+@cve_app.command("search")
+def cve_search_cmd(
+    query: Annotated[str | None, typer.Argument(help="Free-text search keyword or CVE ID.")] = None,
+    product: Annotated[
+        str | None,
+        typer.Option(
+            "--product", "-p", help="Filter by software product name (e.g. openssh, apache)."
+        ),
+    ] = None,
+    min_cvss: Annotated[
+        float | None, typer.Option("--min-cvss", help="Minimum CVSS v3 base score.")
+    ] = None,
+    severity: Annotated[
+        str | None,
+        typer.Option(
+            "--severity", "-s", help="Filter by severity level (critical, high, medium, low)."
+        ),
+    ] = None,
+    known_exploited: Annotated[
+        bool,
+        typer.Option(
+            "--known-exploited",
+            help="Filter for CVEs in CISA Known Exploited Vulnerabilities catalog.",
+        ),
+    ] = False,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum records to return.")] = 25,
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Search cached vulnerability intelligence by keyword, product, or CVSS score."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    cache = VulnerabilityCache(DatabaseManager(db_url) if db_url else None)
+
+    sev_enum = None
+    if severity:
+        try:
+            sev_enum = SeverityLevel(severity.lower())
+        except ValueError:
+            console.print(f"[bold red]Invalid severity level:[/bold red] '{severity}'")
+            raise typer.Exit(code=1) from None
+
+    items = cache.search_cves(
+        query=query,
+        cpe_product=product,
+        min_cvss=min_cvss,
+        severity=sev_enum,
+        is_known_exploited=True if known_exploited else None,
+    )
+
+    if not items:
+        console.print("[dim]No vulnerability intelligence records matched query.[/dim]")
+        return
+
+    table = Table(title=f"Vulnerability Intelligence Results ({len(items)})", border_style="cyan")
+    table.add_column("CVE ID", style="bold red")
+    table.add_column("Severity", justify="center")
+    table.add_column("CVSS v3", justify="right")
+    table.add_column("KEV", justify="center")
+    table.add_column("Product / CPE")
+    table.add_column("Description")
+
+    for item in items[:limit]:
+        kev_str = "[bold red]YES[/bold red]" if item.is_known_exploited else "[dim]NO[/dim]"
+        cpes_str = ", ".join(item.affected_cpes[:2]) if item.affected_cpes else "-"
+        table.add_row(
+            item.cve_id,
+            format_severity(item.severity.value),
+            f"{item.cvss_v3_score:.1f}" if item.cvss_v3_score is not None else "-",
+            kev_str,
+            cpes_str,
+            item.description[:75] + "..." if len(item.description) > 75 else item.description,
+        )
+
+    console.print(table)
+    console.print(
+        "[dim]Use 'reconforge cve show <cve-id>' to view comprehensive vulnerability metrics.[/dim]"
+    )
+
+
+@cve_app.command("show")
+def cve_show_cmd(
+    cve_id: Annotated[str, typer.Argument(help="CVE identifier to inspect (e.g. CVE-2024-6387).")],
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Display comprehensive technical details, CVSS vectors, and criteria for a CVE."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    cache = VulnerabilityCache(DatabaseManager(db_url) if db_url else None)
+
+    item = cache.get_cve(cve_id)
+    if not item:
+        console.print(f"[bold red]CVE not found in local cache:[/bold red] '{cve_id}'")
+        raise typer.Exit(code=1)
+
+    kev_badge = (
+        " [bold red][CISA KEV KNOWN EXPLOITED][/bold red]" if item.is_known_exploited else ""
+    )
+    panel_content = (
+        f"[bold]CVE ID:[/bold] {item.cve_id}{kev_badge}\n"
+        f"[bold]Severity:[/bold] {format_severity(item.severity.value)}    "
+        f"[bold]CVSS v3 Score:[/bold] {item.cvss_v3_score or '-'}    "
+        f"[bold]Vector:[/bold] {item.cvss_v3_vector or '-'}\n"
+        f"[bold]CWE IDs:[/bold] {', '.join(item.cwe_ids) if item.cwe_ids else '-'}\n\n"
+        f"[bold]Description:[/bold]\n{item.description}\n\n"
+        f"[bold]Affected CPEs:[/bold]\n"
+        + "\n".join(f" • {cpe}" for cpe in item.affected_cpes)
+        + "\n\n"
+        + (
+            "[bold]Version Criteria Rules:[/bold]\n"
+            + "\n".join(f" • {crit}" for crit in item.version_criteria)
+            + "\n\n"
+            if item.version_criteria
+            else ""
+        )
+        + (
+            "[bold]Advisory References:[/bold]\n"
+            + "\n".join(f" • {ref}" for ref in item.references)
+            if item.references
+            else ""
+        )
+    )
+    console.print(
+        Panel(
+            panel_content,
+            title=f"Vulnerability Intelligence: {item.cve_id}",
+            border_style="bold red" if item.severity == SeverityLevel.CRITICAL else "yellow",
+        )
+    )
+
+
+@cve_app.command("list-builtin")
+def cve_list_builtin_cmd() -> None:
+    """List all curated built-in offline CVE intelligence entries."""
+    table = Table(
+        title=f"Curated Offline CVE Intelligence Dataset ({len(BUILTIN_CVES)})",
+        border_style="cyan",
+    )
+    table.add_column("CVE ID", style="bold red")
+    table.add_column("Severity", justify="center")
+    table.add_column("CVSS v3", justify="right")
+    table.add_column("KEV", justify="center")
+    table.add_column("Affected Product")
+    table.add_column("Summary")
+
+    for item in BUILTIN_CVES:
+        kev_str = "[bold red]YES[/bold red]" if item.is_known_exploited else "[dim]NO[/dim]"
+        cpes = ", ".join(item.affected_cpes)
+        table.add_row(
+            item.cve_id,
+            format_severity(item.severity.value),
+            f"{item.cvss_v3_score:.1f}" if item.cvss_v3_score is not None else "-",
+            kev_str,
+            cpes,
+            item.description[:70] + "..." if len(item.description) > 70 else item.description,
+        )
+
+    console.print(table)
+
+
+@cve_app.command("correlate")
+def cve_correlate_cmd(
+    assessment_id: Annotated[
+        str | None,
+        typer.Option(
+            "--assessment-id", "-a", help="Correlate services from a specific assessment ID."
+        ),
+    ] = None,
+    record: Annotated[
+        bool,
+        typer.Option(
+            "--record/--no-record", help="Persist correlation results as database findings."
+        ),
+    ] = True,
+    online: Annotated[
+        bool,
+        typer.Option(
+            "--online/--offline", help="Query online NIST NVD API in addition to local cache."
+        ),
+    ] = False,
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Correlate inventoried services with vulnerability intelligence and classify confidence tiers."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    db_mgr = DatabaseManager(db_url) if db_url else DatabaseManager()
+    repo = AssetRepository(db_mgr)
+    cache = VulnerabilityCache(db_mgr)
+    correlator = VulnerabilityCorrelator(cache=cache)
+
+    target_assessment_id = assessment_id
+    if not target_assessment_id:
+        assessments = repo.list_assessments(limit=1)
+        if not assessments:
+            console.print(
+                "[dim]No assessments recorded in inventory yet. Run 'reconforge scan' first.[/dim]"
+            )
+            return
+        target_assessment_id = assessments[0].id
+
+    console.print(
+        f"[bold cyan]Correlating services for assessment [bold white]{target_assessment_id[:8]}[/bold white]...[/bold cyan]"
+    )
+    correlation_map = correlator.correlate_assessment_services(
+        assessment_id=target_assessment_id,
+        repository=repo,
+        record_findings=record,
+        online=online,
+    )
+
+    total_matches = sum(len(res_list) for res_list in correlation_map.values())
+    if total_matches == 0:
+        console.print(
+            "[bold green]Zero CVE correlations matched for discovered services.[/bold green]"
+        )
+        return
+
+    table = Table(
+        title=f"Calibrated CVE Correlation Results ({total_matches} candidate matches)",
+        border_style="bold red",
+    )
+    table.add_column("Service ID", style="dim")
+    table.add_column("CVE ID", style="bold red")
+    table.add_column("Severity", justify="center")
+    table.add_column("Match Level")
+    table.add_column("Matched Version", style="yellow")
+    table.add_column("Evidence Rationale")
+
+    for s_id, res_list in correlation_map.items():
+        for res in res_list:
+            table.add_row(
+                s_id[:8],
+                res.cve.cve_id,
+                format_severity(res.cve.severity.value),
+                format_match_level(res.match_level.value),
+                res.matched_version or "-",
+                res.evidence_rationale[:80] + "..."
+                if len(res.evidence_rationale) > 80
+                else res.evidence_rationale,
+            )
+
+    console.print(table)
+    if record:
+        console.print(
+            f"[bold green]Successfully recorded {total_matches} vulnerability findings to database.[/bold green]"
+        )
+        console.print(
+            "[dim]Run 'reconforge findings list' to inspect findings lifecycle states.[/dim]"
+        )
 
 
 @app.command()
