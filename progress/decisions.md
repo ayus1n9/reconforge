@@ -119,3 +119,27 @@
   - Every finding links back to an evidence payload containing the exact observation parameters (target IP, port, protocol, response latency, banner snippet, and matched criteria).
 - **Consequences**: High-fidelity security intelligence suitable for enterprise SOC triage, compliance auditing, and risk prioritization.
 
+## ADR-012: Calibrated Vulnerability Correlation & Distribution Backport Detection
+- **Date**: 2026-10-29
+- **Status**: ACCEPTED
+- **Context**: Naive vulnerability scanners match banner version strings against CVE ranges and report false-positive "Critical" vulnerabilities. Linux distributions (Debian, Ubuntu, RHEL, CentOS) routinely backport security fixes into older upstream packages without incrementing the upstream version string (e.g. `OpenSSH_8.9p1 Ubuntu-3ubuntu0.10`). Reporting these as unpatched critical vulnerabilities erodes credibility.
+- **Decision**:
+  - Implement a 4-tier calibrated confidence model:
+    - `STRONG_CANDIDATE`: Exact vendor, product, and version boundary matched without packaging ambiguity.
+    - `MANUAL_VERIFICATION_REQUIRED`: Version falls in affected upstream range, but distribution package indicators (Ubuntu, Debian, RHEL, etc.) are detected, requiring package changelog inspection.
+    - `POSSIBLE_MATCH`: Product matches, but version is ambiguous or falls within an unconfirmed range.
+    - `INSUFFICIENT_EVIDENCE`: Product identified, but version is omitted or wild-carded.
+  - Require both vendor and product match against CPE criteria to prevent vendor-level cross-product false positives (e.g., Apache HTTP Server matching Apache Log4j).
+- **Consequences**: Defensible, accurate vulnerability intelligence that security engineers and auditors can trust without noise.
+
+## ADR-013: Offline-First Vulnerability Caching & Bounded NVD Synchronization
+- **Date**: 2026-10-29
+- **Status**: ACCEPTED
+- **Context**: Cybersecurity teams frequently operate in isolated, air-gapped, or restrictive test labs without Internet access. Querying remote APIs like NIST NVD during scans can stall assessments, leak target intelligence, or fail due to strict public API rate limits (5 req/30s).
+- **Decision**:
+  - Local-first architecture: maintain an internal SQLite `cve_cache` table pre-seeded with high-impact curated reference CVEs (regreSSHion, Terrapin, Apache traversal, Log4Shell, Redis sandbox escape, vsftpd backdoor).
+  - Bounded asynchronous NVD client with token-bucket rate limiting (5 req/30s unauthenticated, 50 req/30s with API key), exponential backoff on HTTP 429/503, strict timeout (15s), and 5 MB maximum response payload limits.
+  - Transparent fallback: when offline or when network requests fail, the correlator automatically relies on local SQLite cache without halting scans.
+- **Consequences**: Air-gapped reliability, zero-network scanning support, protection against memory exhaustion, and resilient threat intelligence retrieval.
+
+

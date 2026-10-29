@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-30
+
+### Added
+- **Common Platform Enumeration (CPE 2.3) Engine (`CPE`)**:
+  - Full implementation of NIST IR 7695 CPE 2.3 formatting (`cpe:2.3:a:vendor:product:version:...`) and legacy CPE 2.2 URI compatibility.
+  - Automatic component sanitization stripping whitespace and non-standard characters.
+  - Automated service attribute derivation (`from_service()`) mapping network server software (OpenSSH, Apache, Nginx, Redis, MySQL, PostgreSQL, vsftpd, Docker, etc.) to canonical vendor and product identifiers.
+- **Semantic Version Matching & Distro-Backport Detection (`version_matcher.py`)**:
+  - PEP 440 and loose version comparator for irregular software release numbering schemes (e.g. `8.9p1`, `2.4.49`, `10.2p1`).
+  - Boundary validation evaluating NVD version criteria (`versionStartIncluding`, `versionStartExcluding`, `versionEndIncluding`, `versionEndExcluding`, `exactVersion`).
+  - Distribution backport pattern detector identifying Debian, Ubuntu, RHEL, CentOS, Amazon Linux, and SUSE package markers in banners and version strings.
+- **Curated Built-in CVE Dataset (`BUILTIN_CVES`)**:
+  - Offline vulnerability intelligence for high-profile network services:
+    - `CVE-2024-6387`: OpenSSH regreSSHion unauthenticated remote code execution (CVSS 8.1, High).
+    - `CVE-2023-48795`: SSH transport protocol Terrapin prefix truncation attack (CVSS 5.9, Medium).
+    - `CVE-2018-15473`: OpenSSH user enumeration via authentication response timing (CVSS 5.3, Medium).
+    - `CVE-2021-41773`: Apache HTTP Server path traversal and file disclosure (CVSS 7.5, High).
+    - `CVE-2021-42013`: Apache HTTP Server path traversal and RCE incomplete fix (CVSS 9.8, Critical).
+    - `CVE-2022-0543`: Redis Lua sandbox escape and RCE (CVSS 10.0, Critical).
+    - `CVE-2011-2523`: vsftpd 2.3.4 Smiley backdoor execution (CVSS 9.8, Critical).
+    - `CVE-2021-44228`: Apache Log4j Log4Shell JNDI RCE (CVSS 10.0, Critical).
+  - Complete metadata including CVSS v3 score and vector, CWE IDs, affected CPE configurations, version boundaries, vendor advisory URLs, and CISA Known Exploited Vulnerabilities (KEV) catalog status.
+- **Offline-First SQLite Vulnerability Cache (`VulnerabilityCache`)**:
+  - Persistent SQLite storage in `cve_cache` table with indexes on CVE ID and cached timestamp.
+  - Automatic seeding of curated built-in intelligence on initial run.
+  - Multi-attribute search supporting keywords, CPE product, minimum CVSS base score, severity level, and CISA KEV listing.
+- **Asynchronous NIST NVD Client (`AsyncNVDClient`)**:
+  - Asynchronous client for NIST NVD REST API v2.0 (`services.nvd.nist.gov/rest/json/cves/2.0`).
+  - Token-bucket rate limiter enforcing 5 requests per 30 seconds for public API access and 50 requests per 30 seconds with API key.
+  - Exponential backoff with jitter on HTTP 429 and 503 responses.
+  - Security-hardened HTTP fetching: 15-second timeout, asynchronous execution in thread pool, and 5 MB maximum payload size limit.
+  - Seamless offline fallback: automatically returns local cache items on network error or in offline mode.
+- **Evidence-Calibrated Vulnerability Correlator (`VulnerabilityCorrelator`)**:
+  - Calibrated 4-tier match confidence scoring:
+    - `STRONG_CANDIDATE`: Unambiguous version match within affected range on upstream software.
+    - `MANUAL_VERIFICATION_REQUIRED`: Version falls in vulnerable upstream range, but distribution packaging indicators (e.g. `Ubuntu-3ubuntu0.10`) suggest security patches were backported.
+    - `POSSIBLE_MATCH`: Product matches, but version string is ambiguous or falls within an unconfirmed range.
+    - `INSUFFICIENT_EVIDENCE`: Product identified, but version is absent or wild-carded.
+  - Dual vendor and product matching to eliminate vendor-level false positives (e.g. Apache HTTP Server matching Log4j).
+  - Assessment correlation integration persisting findings to database with mapped lifecycle states (`POTENTIAL_VULNERABILITY`, `NEEDS_REVIEW`, `POTENTIAL_EXPOSURE`, `INFORMATIONAL`).
+- **New CLI Commands & Scan Integration**:
+  - `reconforge cve search <query>`: Search cached vulnerability intelligence with filters.
+  - `reconforge cve show <cve_id>`: Display comprehensive vulnerability metrics, CVSS vector, and references.
+  - `reconforge cve list-builtin`: Tabular overview of curated offline CVE intelligence dataset.
+  - `reconforge cve correlate`: Correlate inventoried services with vulnerability intelligence and classify confidence tiers.
+  - `reconforge scan --correlate-cves`: Integrated network discovery, exposure assessment, and CVE correlation in a single command.
+- **Testing & Security**:
+  - 24 new automated tests added (93 total passing tests across unit, integration, and security boundaries).
+  - Bandit static security analysis clean (0 issues across 5,922 LOC).
+  - Ruff formatting and linting 100% clean.
+
 ## [0.4.0] - 2026-10-27
 
 ### Added

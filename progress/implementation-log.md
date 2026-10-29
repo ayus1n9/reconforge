@@ -216,6 +216,71 @@
   - Test suite expanded to 69 tests across unit, integration, and security boundaries. All 69 tests passed.
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 4,399 LOC.
   - Code formatting & linting: Ruff reported 0 errors, 56 files verified.
-- **Next Recommended Action**: Obtain user review and approval for Phase 4; then proceed to Phase 5 (Vulnerability Intelligence & CVE Correlation Engine).
+- **Git & Release Operations (v0.4.0)**:
+  - Commits:
+    - `84cbc7c`: `feat(assessment): implement declarative exposure assessment engine, builtin rulebook, and findings CLI`
+    - `a5b57d0`: `docs: document Phase 4 exposure assessment engine, architecture decisions, and validation results`
+  - Tag: `v0.4.0`
+  - GitHub Release: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.4.0`
+
+## Phase 5: Vulnerability Intelligence & CVE Correlation Engine
+- **Status**: COMPLETE (Awaiting User Review / Approval for Phase 6)
+- **Implemented Features**:
+  - NIST IR 7695 CPE 2.3 parser and serializer (`CPE`): supports CPE 2.3 format (`cpe:2.3:a:vendor:product:version:...`), legacy CPE 2.2 URI format, automatic component sanitization, and automated service attribute mapping for major services.
+  - Semantic Version Matching Engine (`version_matcher.py`):
+    - PEP 440 parsing and loose version comparator for non-standard software versions (`8.9p1`, `2.4.49`, `10.2p1`, etc.).
+    - Strict boundary validation against NVD criteria (`versionStartIncluding`, `versionStartExcluding`, `versionEndIncluding`, `versionEndExcluding`, `exactVersion`).
+    - Distro backport detection: recognizes Debian, Ubuntu, RHEL, CentOS, Amazon Linux, and SUSE packaging patterns.
+  - Curated Built-in CVE Dataset (`builtin_cves.py`):
+    - High-profile network service CVEs: regreSSHion (`CVE-2024-6387`), Terrapin (`CVE-2023-48795`), OpenSSH user enumeration (`CVE-2018-15473`), Apache traversal & RCE (`CVE-2021-41773`, `CVE-2021-42013`), Redis sandbox escape (`CVE-2022-0543`), vsftpd backdoor (`CVE-2011-2523`), Log4Shell (`CVE-2021-44228`).
+    - Complete metadata with CVSS v3 score, vector, CWEs, affected CPEs, version criteria, advisory URLs, and CISA KEV listing flags.
+  - Local SQLite Vulnerability Cache (`VulnerabilityCache`):
+    - Stores CVE records in `cve_cache` table with indexed lookup by CVE ID and cached timestamp.
+    - Automatic seeding with curated built-in intelligence.
+    - Multi-factor search: free-text query, CPE product, minimum CVSS score, severity level, and CISA KEV filter.
+  - Asynchronous NIST NVD Client (`AsyncNVDClient`):
+    - Queries NIST NVD REST API 2.0 with token-bucket rate limiter (5 req/30s unauthenticated, 50 req/30s authenticated).
+    - Exponential backoff with jitter on HTTP 429/503.
+    - Security-hardened HTTP fetching: async thread execution, 15-second timeout, and 5 MB maximum response size limit.
+    - Transparent offline cache fallback on network failure or offline mode.
+  - Vulnerability Correlator (`VulnerabilityCorrelator`):
+    - Calibrated confidence rating: `STRONG_CANDIDATE`, `MANUAL_VERIFICATION_REQUIRED` (distro backports), `POSSIBLE_MATCH`, `INSUFFICIENT_EVIDENCE`.
+    - Both vendor and product matching to prevent vendor-level cross-product false positives.
+    - Seamless persistence of findings into relational repository with calibrated lifecycle states (`POTENTIAL_VULNERABILITY`, `NEEDS_REVIEW`, `POTENTIAL_EXPOSURE`, `INFORMATIONAL`).
+  - CLI Commands (`cve_app`):
+    - `reconforge cve search <query>`: Search cached intelligence.
+    - `reconforge cve show <cve_id>`: Display comprehensive vulnerability metrics and references.
+    - `reconforge cve list-builtin`: Tabular overview of built-in offline CVE dataset.
+    - `reconforge cve correlate [--assessment-id] [--record/--no-record] [--online/--offline]`: Correlate assessment services against CVE intelligence.
+    - `reconforge scan --correlate-cves`: Integrated discovery, exposure assessment, and CVE correlation in a single workflow.
+- **Files Created**:
+  - `src/reconforge/intelligence/__init__.py`
+  - `src/reconforge/intelligence/models.py`
+  - `src/reconforge/intelligence/cpe.py`
+  - `src/reconforge/intelligence/version_matcher.py`
+  - `src/reconforge/intelligence/builtin_cves.py`
+  - `src/reconforge/intelligence/cache.py`
+  - `src/reconforge/intelligence/nvd_client.py`
+  - `src/reconforge/intelligence/correlator.py`
+  - `tests/unit/test_cpe.py`
+  - `tests/unit/test_version_matcher.py`
+  - `tests/unit/test_cve_cache.py`
+  - `tests/unit/test_cve_correlation.py`
+  - `tests/security/test_nvd_client_safety.py`
+- **Files Modified**:
+  - `pyproject.toml` (bumped to 0.5.0, added `packaging>=24.0`)
+  - `CHANGELOG.md` (documented v0.5.0 release)
+  - `src/reconforge/__init__.py` (bumped to 0.5.0)
+  - `src/reconforge/core/enums.py` (added `VULNERABILITY` to `FindingCategory`)
+  - `src/reconforge/storage/models.py` (added `CVECacheRecord`)
+  - `src/reconforge/cli.py` (added `cve` command group and `--correlate-cves` to `scan`)
+  - `progress/decisions.md` (added ADR-012 and ADR-013)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Test suite expanded to 93 tests across unit, integration, and security boundaries. All 93 tests passed (100%).
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 5,922 LOC.
+  - Code formatting & linting: Ruff reported 0 errors, 69 files verified.
+- **Next Recommended Action**: Obtain user review and approval for Phase 5; then proceed to Phase 6 (Attack-Surface Scoring, Risk Prioritization & Reporting).
+
 
 

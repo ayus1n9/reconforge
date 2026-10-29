@@ -155,4 +155,30 @@
   - `reconforge rules validate examples/rules/custom-rules.yaml` -> PASSED (Validated 2 custom rules)
 - **Phase 4 Acceptance Criteria Status**: PASS.
 
+## Phase 5: Vulnerability Intelligence & CVE Correlation Engine
+- **Validation Date**: 2026-10-30
+- **Test Command**: `pytest -v`
+- **Test Results**:
+  - `tests/unit/test_cpe.py` -> 7 PASSED (CPE 2.3 formatting, URI, parsing, sanitization, service mapping)
+  - `tests/unit/test_version_matcher.py` -> 5 PASSED (loose version parsing, PEP 440 comparison, distro backport detection, NVD range boundaries, confidence tiers)
+  - `tests/unit/test_cve_cache.py` -> 4 PASSED (initialization & seeding, query/product search, severity/CVSS filters, upsert)
+  - `tests/unit/test_cve_correlation.py` -> 4 PASSED (clean version matching, distro backport calibration, patched version false-positive rejection, assessment correlation & finding persistence)
+  - `tests/security/test_nvd_client_safety.py` -> 4 PASSED (rate-limiter throttling, oversized payload rejection, offline fallback, graceful network error handling)
+  - All 93 tests passed in 3.48s (0 failed).
+- **Static Security Scan**:
+  - Command: `bandit -r src/`
+  - Result: No issues identified (5,922 LOC, 0 issues, High: 0, Medium: 0, Low: 0).
+- **Code Quality & Linter**:
+  - Command: `ruff check . && ruff format --check .`
+  - Result: All checks passed! 69 files verified.
+- **CLI Commands Validation**:
+  - `reconforge version` -> PASSED (v0.5.0)
+  - `reconforge cve list-builtin` -> PASSED (Rendered table of 8 curated offline CVE items)
+  - `reconforge cve search openssh` -> PASSED (Rendered 3 OpenSSH CVE records with CVSS scores & KEV flags)
+  - `reconforge cve show CVE-2024-6387` -> PASSED (Rendered regreSSHion intelligence panel with CISA KEV badge and criteria)
+  - `reconforge scan 127.0.0.1 -p 22 -y --correlate-cves` -> PASSED (Scanned local SSH, correctly verified patched OpenSSH 10.2p1 with 0 false positive CVE findings)
+  - `reconforge cve correlate` -> PASSED (Evaluated inventoried services with calibrated match tiers)
+- **Phase 5 Acceptance Criteria Status**: PASS.
+
+
 
