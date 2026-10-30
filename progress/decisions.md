@@ -142,4 +142,31 @@
   - Transparent fallback: when offline or when network requests fail, the correlator automatically relies on local SQLite cache without halting scans.
 - **Consequences**: Air-gapped reliability, zero-network scanning support, protection against memory exhaustion, and resilient threat intelligence retrieval.
 
+## ADR-014: Explainable Attack-Surface Scoring & Risk Prioritization
+- **Date**: 2026-10-30
+- **Status**: ACCEPTED
+- **Context**: Security assessments often output arbitrary severity counts or opaque numerical scores that cannot be explained or defended in executive or SOC review. Furthermore, averaging asset scores across a large network allows critical servers to be obscured by dozens of clean endpoints.
+- **Decision**:
+  - Implement a transparent, mathematical attack-surface scoring algorithm bounded strictly between 0.0 and 100.0:
+    $$\text{Raw Score} = (S_{exp} + S_{findings}) \times W_{crit} \times M_{threat}$$
+  - Calculate Network Exposure Base ($S_{exp}$) from open port count (1.5 pts/port, max 15.0) and sensitive exposed protocols (database +4.0, cleartext +3.0, remote management +2.0), capped at 25.0 pts.
+  - Weight active findings ($S_{findings}$) by severity (Critical: 25.0, High: 15.0, Medium: 7.0, Low: 2.0, Info: 0.5) and scale by finding lifecycle state modifiers (`confirmed`: 1.0, `potential_vulnerability`: 0.9, `potential_exposure`: 0.75, `needs_review`: 0.6, `false_positive`: 0.0).
+  - Apply Asset Criticality Multiplier ($W_{crit}$): Critical (1.5x), High (1.2x), Medium (1.0x), Low (0.8x).
+  - Apply Threat Intelligence Multiplier ($M_{threat}$): CISA KEV exploitation (1.35x), Remote Code Execution (1.20x).
+  - Emit an auditable list of human-readable mathematical steps (`component_explanations`) for every asset evaluation.
+  - Compute overall estate posture using a max-anchored composite ($0.6 \times \max + 0.4 \times \text{mean}$) to guarantee that catastrophic vulnerabilities on critical assets are never diluted by clean nodes.
+  - Map deterministic remediation urgency into 5 clear tiers: P1 (Immediate), P2 (High Urgency), P3 (Medium Urgency), P4 (Low Urgency), P5 (Informational).
+- **Consequences**: Explainable, defensible risk metrics aligned with real-world enterprise vulnerability management programs.
+
+## ADR-015: Multi-Format Report Generation Security (CWE-1236 & CWE-79)
+- **Date**: 2026-10-30
+- **Status**: ACCEPTED
+- **Context**: Security scanning reports consume untrusted external data (network banners, HTTP titles, hostnames, reverse DNS records). When exported to CSV, unescaped formulas (`=cmd|...`) execute arbitrary code in Excel (CWE-1236). When exported to HTML, unsanitized banners or target descriptions execute stored XSS (CWE-79). Furthermore, external CDN dependencies (fonts, stylesheets, JS libraries) break in air-gapped security enclaves and introduce supply chain risks.
+- **Decision**:
+  - Fortify CSV generation (`sanitize_csv_cell`): Prepend a single quote (`'`) to any cell beginning with dangerous formula or command characters (`=`, `+`, `-`, `@`, `\t`, `\r`).
+  - Strict HTML escaping: Escape all scanner outputs, target IPs, hostnames, titles, and descriptions using `html.escape(..., quote=True)` prior to interpolation.
+  - 100% self-contained HTML: Zero external CDN stylesheets, scripts, or images. Embed all typography, color palettes, badges, responsive CSS, and layout styling directly within an inline `<style>` block.
+- **Consequences**: Safe, verifiable reporting documents that can be safely viewed in spreadsheet software and web browsers without code execution risks, even in completely air-gapped defense enclaves.
+
+
 

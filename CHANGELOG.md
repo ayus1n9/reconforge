@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-30
+
+### Added
+- **Explainable Attack-Surface Scoring Engine (`AttackSurfaceCalculator`)**:
+  - Transparent, mathematical scoring algorithm generating defensible risk scores bounded strictly between 0.0 and 100.0.
+  - Multi-factor risk formula: `Raw Score = (Exposure_Base + Findings_Subtotal) * Criticality_Weight * Threat_Multiplier`.
+  - Network exposure baseline factoring open transport ports (1.5 pts per port, capped at 15.0) and sensitive protocols (database services +4.0 pts, cleartext protocols +3.0 pts, remote management +2.0 pts), with total exposure capped at 25.0 pts.
+  - Security findings subtotal weighting confirmed findings (Critical: 25.0, High: 15.0, Medium: 7.0, Low: 2.0, Informational: 0.5) scaled by lifecycle state modifiers (`confirmed`: 1.0, `potential_vulnerability`: 0.9, `potential_exposure`: 0.75, `needs_review`: 0.6, `false_positive`: 0.0).
+  - Asset criticality factor: Critical (1.5x), High (1.2x), Medium (1.0x), Low (0.8x).
+  - Threat intelligence multiplier: Active CISA KEV exploitation (1.35x), Remote Code Execution (1.20x).
+  - Complete, step-by-step mathematical explanation trail (`component_explanations`) embedded in every calculation for SOC auditability.
+  - Overall estate posture calculation using max-anchored composite aggregation (`0.6 * max + 0.4 * mean`) preventing severe asset risks from being diluted by clean nodes.
+- **Deterministic Risk Prioritization Engine (P1 to P5)**:
+  - Deterministic priority assignment mapped directly to remediation urgency:
+    - `P1 (Immediate)`: Actively exploited vulnerabilities (CISA KEV) or Critical severity issues on High/Critical assets.
+    - `P2 (High Urgency)`: Critical severity on Medium/Low assets, High severity exposures, or exposed database services.
+    - `P3 (Medium Urgency)`: Cleartext protocols (Telnet, HTTP, FTP) or legacy cryptographic configurations.
+    - `P4 (Low Urgency)`: Minor service misconfigurations or general network hygiene issues.
+    - `P5 (Informational)`: Software version disclosures or routine inventory observations.
+- **Multi-Format Report Generation Engine (`ReportEngine`)**:
+  - `JSONReportGenerator`: Structured, schema-validated JSON report export suitable for SIEM, SOAR, and automated CI/CD pipeline consumption.
+  - `MarkdownReportGenerator`: GitHub Flavored Markdown executive summary, urgency breakdown tables, asset inventory matrix, detailed findings catalog, and actionable remediation roadmap.
+  - `CSVReportGenerator`: Tabular export fortified against spreadsheet formula injection attacks (CWE-1236) by neutralizing dangerous control characters (`=`, `+`, `-`, `@`, `\t`, `\r`) with single-quote escaping.
+  - `HTMLReportGenerator`: Standalone, self-contained HTML5 report with zero external CDN dependencies, embedded CSS design system, color-coded risk meter, responsive tables, and strict HTML escaping (`html.escape`) to prevent cross-site scripting (CWE-79).
+- **New CLI Commands & Scan Integration**:
+  - `reconforge score <assessment_id> [--detail]`: Calculate and display aggregate posture and detailed asset attack-surface scores.
+  - `reconforge report generate <assessment_id> [--format html|json|markdown|csv] [--output path]`: Build and export comprehensive reports.
+  - `reconforge report export <assessment_id> [--format html|json|markdown|csv] [--output path]`: Export reports directly to disk.
+  - `reconforge scan`: Integrated real-time posture panel output and `--json` format enrichment with `risk_posture`.
+- **Database Model Enhancements**:
+  - Added `risk_score` and `risk_breakdown` columns to `AssetRecord`.
+  - Added `risk_score` and `risk_posture` columns to `AssessmentRecord`.
+- **Testing & Security**:
+  - 28 new automated tests added (121 total passing tests across unit, integration, and security suites).
+  - Zero Bandit static security issues across 7,244 LOC.
+  - Complete coverage for CWE-1236 formula injection and CWE-79 XSS prevention.
+
 ## [0.5.0] - 2026-10-30
 
 ### Added

@@ -282,5 +282,63 @@
   - Code formatting & linting: Ruff reported 0 errors, 69 files verified.
 - **Next Recommended Action**: Obtain user review and approval for Phase 5; then proceed to Phase 6 (Attack-Surface Scoring, Risk Prioritization & Reporting).
 
+## Phase 6: Attack-Surface Scoring, Risk Prioritization & Reporting Engine
+- **Status**: COMPLETE (Validated & Ready for Release)
+- **Implemented Features**:
+  - Explainable Mathematical Attack-Surface Scoring (`AttackSurfaceCalculator`):
+    - Computes defensible risk score strictly bounded on a 0.0 to 100.0 scale.
+    - Multi-factor algorithm: `Raw Score = (Exposure_Base + Findings_Subtotal) * Criticality_Weight * Threat_Multiplier`.
+    - Network Exposure Base factors port count (1.5 pts/port, max 15.0) and sensitive protocols (database +4.0, cleartext +3.0, management +2.0), capped at 25.0 pts.
+    - Findings Subtotal weights severity (Critical: 25.0, High: 15.0, Medium: 7.0, Low: 2.0, Info: 0.5) modulated by finding lifecycle state (confirmed: 1.0, potential_vulnerability: 0.9, potential_exposure: 0.75, needs_review: 0.6, false_positive: 0.0).
+    - Criticality weighting: Critical (1.5x), High (1.2x), Medium (1.0x), Low (0.8x).
+    - Threat intelligence modifier: CISA KEV active exploitation (1.35x), Remote Code Execution (1.20x).
+    - Step-by-step mathematical explanation trail (`component_explanations`) embedded in every calculation for SOC auditability.
+    - Composite posture calculation using max-anchored formula (`0.6 * max + 0.4 * mean`) ensuring critical asset exposures are never obscured by large pools of clean assets.
+  - Deterministic Risk Prioritization Engine:
+    - Prioritizes remediation urgency from P1 to P5:
+      - P1 (Immediate): CISA KEV or Critical on Critical/High assets.
+      - P2 (High Urgency): Critical on Medium/Low assets, High severity issues, or database exposures.
+      - P3 (Medium Urgency): Cleartext protocols or TLS misconfigurations.
+      - P4 (Low Urgency): Minor configuration issues.
+      - P5 (Informational): Routine disclosures and hygiene observations.
+  - Multi-Format Reporting Engine (`ReportEngine`):
+    - JSON Export (`JSONReportGenerator`): Structured machine-readable schema for SIEM/SOAR integration.
+    - Markdown Export (`MarkdownReportGenerator`): GitHub Flavored Markdown with executive summaries, urgency breakdown tables, asset matrices, and remediation roadmaps.
+    - CSV Export (`CSVReportGenerator`): Tabular findings fortified against spreadsheet formula injection (CWE-1236) via `'` prepending.
+    - HTML Export (`HTMLReportGenerator`): 100% self-contained HTML5 report with zero external CDN dependencies, embedded CSS styling, color-coded score meter, responsive layout, and strict HTML escaping (CWE-79).
+  - CLI Integration:
+    - Added `reconforge score <assessment_id> [--detail]` command.
+    - Added `reconforge report generate` and `reconforge report export` commands.
+    - Integrated real-time posture panel output and `--json` format enrichment in `reconforge scan`.
+  - Database Enhancements:
+    - Added `risk_score` and `risk_breakdown` to `AssetRecord`.
+    - Added `risk_score` and `risk_posture` to `AssessmentRecord`.
+- **Files Created**:
+  - `src/reconforge/scoring/__init__.py`
+  - `src/reconforge/scoring/models.py`
+  - `src/reconforge/scoring/calculator.py`
+  - `src/reconforge/reporting/__init__.py`
+  - `src/reconforge/reporting/models.py`
+  - `src/reconforge/reporting/generators.py`
+  - `src/reconforge/reporting/engine.py`
+  - `tests/unit/test_scoring.py`
+  - `tests/unit/test_reports.py`
+  - `tests/security/test_report_injection.py`
+- **Files Modified**:
+  - `pyproject.toml` (bumped to 0.6.0)
+  - `src/reconforge/__init__.py` (bumped to 0.6.0)
+  - `src/reconforge/core/enums.py` (added `RiskPriority`, `ReportFormat`, `AssetCriticality`)
+  - `src/reconforge/storage/models.py` (added risk columns)
+  - `src/reconforge/cli.py` (added `score` and `report` subcommands, enhanced `scan` output)
+  - `CHANGELOG.md` (documented v0.6.0 release)
+  - `progress/decisions.md` (added ADR-014 and ADR-015)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Test suite expanded to 121 tests across unit, integration, and security boundaries. All 121 tests passed (100%).
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 7,244 LOC.
+  - Code formatting & linting: Ruff reported 0 errors, 79 files verified.
+- **Next Recommended Action**: Obtain user review and approval for Phase 6; then proceed to Phase 7 (FastAPI Local Security Intelligence API).
+
+
 
 

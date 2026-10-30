@@ -180,5 +180,39 @@
   - `reconforge cve correlate` -> PASSED (Evaluated inventoried services with calibrated match tiers)
 - **Phase 5 Acceptance Criteria Status**: PASS.
 
+## Phase 6: Attack-Surface Scoring, Risk Prioritization & Reporting Engine
+- **Validation Date**: 2026-10-30
+- **Test Command**: `pytest -v`
+- **Test Results**:
+  - `tests/unit/test_scoring.py`:
+    - `TestPriorityMapping`: CISA KEV priority elevation (P1), critical severity asset dependency, high severity (P2), database exposure elevation (P2), medium/low/info mappings (P3/P4/P5).
+    - `TestRiskLevelMapping`: Qualitative threshold boundaries (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NEGLIGIBLE`).
+    - `TestAssetScoring`: Clean asset zero baseline, network exposure base point calculation, asset criticality weighting, CISA KEV and RCE threat multipliers, score clamping at 100.0, false positive finding exclusions.
+    - `TestAssessmentRiskPosture`: Multi-asset posture aggregation ($0.6 \times \max + 0.4 \times \text{mean}$) and repository persistence.
+  - `tests/unit/test_reports.py`:
+    - `TestJSONReportGenerator`: Structured JSON generation and roundtrip Pydantic validation.
+    - `TestMarkdownReportGenerator`: Executive posture, urgency tables, asset matrix, and remediation roadmap formatting.
+    - `TestCSVReportGenerator`: Tabular findings export and header conformity.
+    - `TestHTMLReportGenerator`: Standalone HTML5 generation, zero external CDN dependencies, embedded CSS styling, color meters.
+    - `TestReportEngine`: Full report build and export workflow from SQLite repository.
+  - `tests/security/test_report_injection.py`:
+    - `TestCSVFormulaInjectionSanitization`: Formula prefix neutralization (`=`, `+`, `-`, `@`, `\t`, `\r`) via single-quote escaping (CWE-1236).
+    - `TestHTMLXSSSanitization`: Strict escaping of injected script tags, img error handlers, and attribute quotes (CWE-79).
+  - All 121 tests passed in 3.61s (0 failed, 100% pass rate).
+- **Static Security Scan**:
+  - Command: `bandit -r src/`
+  - Result: No issues identified (7,244 LOC, 0 issues, High: 0, Medium: 0, Low: 0).
+- **Code Quality & Linter**:
+  - Command: `ruff check . && ruff format --check .`
+  - Result: All checks passed! 79 files verified.
+- **CLI Commands Validation**:
+  - `reconforge version` -> PASSED (v0.6.0)
+  - `reconforge score --help` -> PASSED
+  - `reconforge report --help` -> PASSED
+  - `reconforge report generate --help` -> PASSED
+  - `reconforge report export --help` -> PASSED
+- **Phase 6 Acceptance Criteria Status**: PASS.
+
+
 
 
