@@ -105,3 +105,40 @@ class FindingCategory(StrEnum):
     NETWORK_EXPOSURE = "network_exposure"
     MISCONFIGURATION = "misconfiguration"
     VULNERABILITY = "vulnerability"
+
+
+class RiskPriority(StrEnum):
+    """Deterministic remediation urgency classification."""
+
+    P1 = "P1"
+    """Critical / Immediate: Active exploitation vector (CISA KEV) or critical vulnerability on high/critical asset."""
+
+    P2 = "P2"
+    """High: Unauthenticated high-severity exposure or database interface exposed to network."""
+
+    P3 = "P3"
+    """Medium: Cleartext protocol, legacy encryption, or moderate security weakness."""
+
+    P4 = "P4"
+    """Low: Minor misconfiguration or low-severity vulnerability."""
+
+    P5 = "P5"
+    """Informational: Information disclosure, version banners, or hygiene observations."""
+
+
+class ReportFormat(StrEnum):
+    """Supported export formats for security assessment reports."""
+
+    JSON = "json"
+    MARKDOWN = "markdown"
+    CSV = "csv"
+    HTML = "html"
+
+
+class AssetCriticality(StrEnum):
+    """Business criticality ranking for normalized network assets."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"

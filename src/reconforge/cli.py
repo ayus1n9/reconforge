@@ -16,7 +16,12 @@ from rich.table import Table
 from reconforge import __version__
 from reconforge.assessment.custom_rules import RuleLoadingError, load_rules_from_file
 from reconforge.assessment.engine import ExposureEngine
-from reconforge.core.enums import ObservationConfidence, PortState, SeverityLevel
+from reconforge.core.enums import (
+    ObservationConfidence,
+    PortState,
+    ReportFormat,
+    SeverityLevel,
+)
 from reconforge.core.exceptions import ScopeViolationError
 from reconforge.core.models import (
     ScanConfig,
@@ -32,6 +37,8 @@ from reconforge.intelligence.cache import VulnerabilityCache
 from reconforge.intelligence.correlator import VulnerabilityCorrelator
 from reconforge.inventory.repository import AssetRepository
 from reconforge.inventory.snapshot import SnapshotManager
+from reconforge.reporting.engine import ReportEngine
+from reconforge.scoring.calculator import AttackSurfaceCalculator
 from reconforge.storage.database import DatabaseManager
 from reconforge.utils.logging import setup_logging
 from reconforge.utils.network import parse_ports
@@ -59,6 +66,9 @@ rules_app = typer.Typer(
     name="rules", help="Inspect and validate declarative exposure assessment rules."
 )
 cve_app = typer.Typer(name="cve", help="Vulnerability intelligence and CVE correlation engine.")
+report_app = typer.Typer(
+    name="report", help="Generate and export comprehensive security assessment reports."
+)
 
 app.add_typer(assets_app)
 app.add_typer(assessments_app)
@@ -66,6 +76,7 @@ app.add_typer(snapshot_app)
 app.add_typer(findings_app)
 app.add_typer(rules_app)
 app.add_typer(cve_app)
+app.add_typer(report_app)
 
 console = Console()
 
@@ -94,6 +105,20 @@ def format_match_level(match_level: str) -> str:
     elif m == "possible_match":
         return "[magenta]POSSIBLE MATCH[/magenta]"
     return "[dim]INSUFFICIENT EVIDENCE[/dim]"
+
+
+def format_priority(priority: str) -> str:
+    """Format remediation priority with appropriate terminal badge colors."""
+    p = priority.upper()
+    if p == "P1":
+        return "[bold white on red] P1 [/bold white on red]"
+    elif p == "P2":
+        return "[bold red]P2[/bold red]"
+    elif p == "P3":
+        return "[bold yellow]P3[/bold yellow]"
+    elif p == "P4":
+        return "[bold blue]P4[/bold blue]"
+    return "[dim]P5[/dim]"
 
 
 @app.command()
@@ -300,6 +325,7 @@ def scan(
 
     # 5. Persistent Inventory Recording & Exposure Assessment (Phase 3 & 4)
     findings = []
+    posture = None
     if save and summary.status != "cancelled":
         try:
             db_mgr = DatabaseManager()
@@ -320,6 +346,12 @@ def scan(
                     summary.scan_id, repo, record_findings=True, online=False
                 )
                 findings = repo.list_findings(assessment_id=summary.scan_id)
+            if assess or correlate_cves:
+                try:
+                    calc = AttackSurfaceCalculator()
+                    posture = calc.calculate_assessment_posture(summary.scan_id, repo)
+                except Exception as p_err:
+                    logger.debug("Failed to calculate assessment posture: %s", p_err)
         except Exception as save_err:
             logger.warning("Failed to persist scan results or assess exposures: %s", save_err)
 
@@ -345,6 +377,7 @@ def scan(
             "summary": summary.model_dump(),
             "observations": [obs.model_dump(mode="json") for obs in observations],
             "findings": findings_json,
+            "risk_posture": posture.model_dump(mode="json") if posture else None,
         }
         console.print(json.dumps(out, indent=2))
         return
@@ -455,6 +488,50 @@ def scan(
         console.print(f_table)
         console.print(
             "[dim]Run 'reconforge findings list' or 'reconforge findings show <id>' for full details and remediation.[/dim]"
+        )
+
+    if posture:
+        sev_color = {
+            "CRITICAL": "bold red",
+            "HIGH": "red",
+            "MEDIUM": "yellow",
+            "LOW": "blue",
+            "NEGLIGIBLE": "dim",
+        }.get(posture.risk_level.upper(), "white")
+        p_dist = posture.priority_distribution
+        p1 = p_dist.get("P1", 0)
+        p2 = p_dist.get("P2", 0)
+        p3 = p_dist.get("P3", 0)
+        p4 = p_dist.get("P4", 0)
+        p5 = p_dist.get("P5", 0)
+        scores = [a.score for a in posture.asset_scores] if posture.asset_scores else [0.0]
+        max_asset = max(scores)
+        mean_asset = sum(scores) / len(scores) if scores else 0.0
+
+        posture_panel = Panel(
+            f"[bold]Overall Attack-Surface Score:[/bold] [{sev_color}]{posture.overall_score:.1f} / 100.0[/{sev_color}] "
+            f"([{sev_color}]{posture.risk_level.upper()}[/{sev_color}])\n"
+            f"[bold]Highest Asset Risk:[/bold] {max_asset:.1f}  |  "
+            f"[bold]Mean Asset Risk:[/bold] {mean_asset:.1f}  |  "
+            f"[bold]Assessed Assets:[/bold] {posture.assessed_assets_count}  |  "
+            f"[bold]Assets at Risk:[/bold] {posture.assets_at_risk_count}\n"
+            f"[bold]Action Urgency:[/bold] [bold red]{p1} P1 Critical[/bold red], "
+            f"[red]{p2} P2 High[/red], "
+            f"[yellow]{p3} P3 Medium[/yellow], "
+            f"[blue]{p4} P4 Low[/blue], "
+            f"[dim]{p5} P5 Info[/dim]",
+            title="Attack Surface & Risk Posture",
+            border_style=(
+                "bold red"
+                if posture.overall_score >= 60.0
+                else "yellow"
+                if posture.overall_score >= 30.0
+                else "green"
+            ),
+        )
+        console.print(posture_panel)
+        console.print(
+            f"[dim]Export comprehensive executive & engineering reports with: reconforge report generate {summary.scan_id}[/dim]"
         )
 
 
@@ -1133,6 +1210,195 @@ def cve_correlate_cmd(
         console.print(
             "[dim]Run 'reconforge findings list' to inspect findings lifecycle states.[/dim]"
         )
+
+
+@app.command("score")
+def score_cmd(
+    assessment_id: Annotated[
+        str | None, typer.Argument(help="Assessment identifier UUID or prefix.")
+    ] = None,
+    detail: Annotated[
+        bool,
+        typer.Option("--detail", "-d", help="Display per-asset score breakdown and audit trail."),
+    ] = False,
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Calculate and inspect explainable attack-surface risk posture and asset scores."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    repo = AssetRepository(DatabaseManager(db_url) if db_url else DatabaseManager())
+    calc = AttackSurfaceCalculator()
+
+    target_id = assessment_id
+    if not target_id:
+        assessments = repo.list_assessments(limit=1)
+        if not assessments:
+            console.print(
+                "[dim]No assessments recorded in inventory yet. Run 'reconforge scan' first.[/dim]"
+            )
+            return
+        target_id = assessments[0].id
+
+    try:
+        posture = calc.calculate_assessment_posture(target_id, repo)
+    except Exception as err:
+        console.print(f"[bold red]Scoring Error:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+    posture_panel = Panel(
+        f"[bold]Assessment ID:[/bold] {posture.assessment_id}\n"
+        f"[bold]Attack-Surface Risk Score:[/bold] [bold red]{posture.overall_score:.1f}[/bold red] / 100.0\n"
+        f"[bold]Risk Tier:[/bold] [bold yellow]{posture.risk_level}[/bold yellow]\n"
+        f"[bold]Assessed Assets:[/bold] {posture.assessed_assets_count} total ({posture.assets_at_risk_count} exposed or at-risk)",
+        title="Executive Attack-Surface Posture",
+        border_style="bold red" if posture.overall_score >= 60.0 else "yellow",
+    )
+    console.print(posture_panel)
+
+    p_table = Table(title="Remediation Urgency Distribution", border_style="cyan")
+    p_table.add_column("Priority", justify="center")
+    p_table.add_column("Urgency Level")
+    p_table.add_column("Finding Count", justify="center")
+
+    p_desc = {
+        "P1": "Immediate / Critical (CISA KEV or Critical on Key Asset)",
+        "P2": "High Urgency (Critical/High Vuln or Database Exposure)",
+        "P3": "Medium Urgency (Cleartext Protocols / Legacy TLS)",
+        "P4": "Low Urgency (Minor Misconfiguration / Weak Hygiene)",
+        "P5": "Informational (Version Disclosure / Routine Observation)",
+    }
+    for p in ["P1", "P2", "P3", "P4", "P5"]:
+        c = posture.priority_distribution.get(p, 0)
+        p_table.add_row(format_priority(p), p_desc.get(p, ""), str(c))
+    console.print(p_table)
+
+    if posture.key_exposure_drivers:
+        console.print("[bold red]Primary Exposure Drivers:[/bold red]")
+        for d in posture.key_exposure_drivers:
+            console.print(f" • [red]⚠️[/red] {d}")
+
+    if detail and posture.asset_scores:
+        a_table = Table(title="Asset Attack-Surface Risk Breakdown", border_style="dim")
+        a_table.add_column("Asset IP", style="bold")
+        a_table.add_column("Criticality", justify="center")
+        a_table.add_column("Score", justify="right", style="bold")
+        a_table.add_column("Risk Tier")
+        a_table.add_column("Priority", justify="center")
+        a_table.add_column("Explanations")
+
+        for a in posture.asset_scores:
+            expl_str = "\n".join(f"• {e}" for e in a.breakdown.component_explanations)
+            a_table.add_row(
+                a.ip_address,
+                a.criticality.value.upper(),
+                f"{a.score:.1f}",
+                a.risk_level,
+                format_priority(a.top_priority.value),
+                expl_str,
+            )
+        console.print(a_table)
+
+
+@report_app.command("generate")
+def report_generate_cmd(
+    assessment_id: Annotated[
+        str | None, typer.Argument(help="Assessment identifier UUID or prefix.")
+    ] = None,
+    format: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: json, markdown, csv, or html.")
+    ] = "html",
+    output: Annotated[
+        str | None, typer.Option("--output", "-o", help="File path to write report to.")
+    ] = None,
+    title: Annotated[
+        str, typer.Option("--title", help="Custom report title.")
+    ] = "ReconForge Attack-Surface Exposure & Security Intelligence Report",
+    organization: Annotated[
+        str, typer.Option("--organization", help="Organization name.")
+    ] = "Authorized Security Operations",
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Generate and export a multi-format assessment report (HTML, JSON, Markdown, CSV)."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    repo = AssetRepository(DatabaseManager(db_url) if db_url else DatabaseManager())
+    engine = ReportEngine()
+
+    target_id = assessment_id
+    if not target_id:
+        assessments = repo.list_assessments(limit=1)
+        if not assessments:
+            console.print(
+                "[dim]No assessments recorded in inventory yet. Run 'reconforge scan' first.[/dim]"
+            )
+            return
+        target_id = assessments[0].id
+
+    clean_fmt = format.lower().strip()
+    try:
+        fmt_enum = ReportFormat(clean_fmt)
+    except ValueError:
+        console.print(
+            f"[bold red]Unsupported format:[/bold red] '{format}'. Must be one of: json, markdown, csv, html."
+        )
+        raise typer.Exit(code=1) from None
+
+    try:
+        report = engine.build_report(
+            assessment_id=target_id,
+            repository=repo,
+            title=title,
+            organization=organization,
+        )
+        content = engine.export_report(report, format=fmt_enum, output_path=output)
+    except Exception as err:
+        console.print(f"[bold red]Report Generation Failed:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+    if output:
+        console.print(
+            f"[bold green]Report successfully generated and saved to:[/bold green] [bold cyan]{output}[/bold cyan] ({len(content)} bytes)"
+        )
+    else:
+        if clean_fmt == "html":
+            console.print(
+                "[yellow]Warning: Dumping raw HTML to terminal. Use '--output <file.html>' to save.[/yellow]"
+            )
+        console.print(content)
+
+
+@report_app.command("export")
+def report_export_cmd(
+    assessment_id: Annotated[
+        str | None, typer.Argument(help="Assessment identifier UUID or prefix.")
+    ] = None,
+    format: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: json, markdown, csv, or html.")
+    ] = "html",
+    output: Annotated[
+        str, typer.Option("--output", "-o", help="File path to write report to.")
+    ] = "report.html",
+    title: Annotated[
+        str, typer.Option("--title", help="Custom report title.")
+    ] = "ReconForge Attack-Surface Exposure & Security Intelligence Report",
+    organization: Annotated[
+        str, typer.Option("--organization", help="Organization name.")
+    ] = "Authorized Security Operations",
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Export assessment report directly to a file."""
+    report_generate_cmd(
+        assessment_id=assessment_id,
+        format=format,
+        output=output,
+        title=title,
+        organization=organization,
+        db_path=db_path,
+    )
 
 
 @app.command()

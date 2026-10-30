@@ -40,6 +40,8 @@ class AssetRecord(Base):
         nullable=False,
     )
     discovery_sources: Mapped[list[str]] = mapped_column(JSON, default=list)
+    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Relationships
@@ -103,6 +105,8 @@ class AssessmentRecord(Base):
     )
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     coverage_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_posture: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
