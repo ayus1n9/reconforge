@@ -199,3 +199,21 @@
     - Enforce strict scope boundary validation (`ScopeManager.validate_target_and_port`) on all API scan requests, immediately rejecting cloud metadata endpoints (`169.254.169.254`) and unauthorized public IPs with HTTP 403 Forbidden.
   - Introduce `reconforge serve` CLI command with interactive Rich diagnostics and launch banners.
 - **Consequences**: High-throughput, programmable local intelligence service with OpenAPI schema adherence, zero-network scanning compatibility, and complete separation between background scan routines and HTTP request lifecycles.
+
+## ADR-018: Modern React / TypeScript Security Intelligence Web Dashboard
+- **Date**: 2026-11-01
+- **Status**: ACCEPTED
+- **Context**: While CLI commands and raw REST APIs provide programmatic power, SOC analysts, vulnerability managers, and security leaders require an interactive visual interface to track perimeter attack surface drift, monitor live network discovery progress, triage findings, and generate compliance reports.
+- **Decision**:
+  - Adopt **React 18**, **TypeScript**, **Vite**, and **Tailwind CSS** for a responsive, dark-mode-first cybersecurity dashboard housed in `web/`.
+  - Build a strongly-typed TypeScript API client (`web/src/api/client.ts` and `web/src/api/types.ts`) guaranteeing 100% type symmetry with FastAPI's Pydantic schemas.
+  - Implement six dedicated operational views:
+    - **Posture Overview**: Max-anchored composite score gauge (0-100), deterministic priority distribution bar chart (P1-P5 via Recharts), key metrics (assets, findings, KEV alerts), and recent runs.
+    - **Scan & Assess**: Target boundary configuration, real-time scope validator feedback (`POST /api/v1/scope/validate`), live background probe progress polling (`completed_probes / total_probes`, percentage, elapsed time), cooperative cancellation (`POST /api/v1/assessments/{id}/cancel`), and historical execution management.
+    - **Asset Inventory**: Search by IP or hostname, filter by criticality tier, and inspect observed transport listeners, application banners, and CPE identifiers in a dedicated slide-out drawer.
+    - **Vulnerabilities Triage**: Multi-facet filtering by severity, priority, state, and CISA KEV exploitation status; interactive state transitions (`confirmed`, `false_positive`, `accepted_risk`, `needs_review`) with auditable justification notes saved to evidence.
+    - **Assessment Differencer**: Coverage-aware comparison of database runs or raw JSON snapshots; displays risk drift direction (`IMPROVED`, `DEGRADED`, `STABLE`), score variance ($\Delta \text{Score}$), executive briefing bullets, port transitions, software version updates, and finding lifecycle deltas.
+    - **Audit Reports & Snapshots**: One-click streaming downloads for self-contained HTML, JSON, Markdown, and CSV reports; point-in-time JSON snapshot export; and schema-validated external snapshot import.
+  - Unify local deployment: Mount the production-built bundle (`web/dist`) under `/ui` within the FastAPI application instance (`create_app`), advertise the dashboard link in the `reconforge serve` terminal banner, and maintain standalone Vite development proxy support.
+- **Consequences**: Complete, browser-based attack surface management experience running locally with zero external cloud dependencies, enterprise-grade responsiveness, and native integration with the ReconForge CLI.
+

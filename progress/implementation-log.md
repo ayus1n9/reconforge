@@ -461,7 +461,69 @@
   - Test suite expanded to 161 tests across unit, integration, and security boundaries. All 161 tests passed (100%).
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 10,248 LOC.
   - Code formatting & linting: Ruff reported 0 errors, 111 files verified clean.
-- **Next Recommended Action**: Obtain user review and approval for Phase 8; then proceed to Phase 9 (Frontend Dashboard - React/TypeScript).
+
+## Phase 9: Modern React / TypeScript Security Intelligence Dashboard
+- **Status**: COMPLETE (Ready for User Review / Approval for Phase 10)
+- **Implemented Features**:
+  - **Toolchain & Scaffold (`web/`)**:
+    - Vite 5, React 18, TypeScript 5, Tailwind CSS 3, PostCSS, Autoprefixer, Lucide-React, Recharts.
+    - Dark-mode-first cybersecurity SOC aesthetic with obsidian slate backdrop (`#090d16`) and emerald accents.
+  - **Type-Safe API Client (`web/src/api/`)**:
+    - `types.ts`: Mirroring all backend Pydantic models for systems, scope, assessments, assets, findings, scoring, diffs, reports, and snapshots.
+    - `client.ts`: Reusable asynchronous API client with API key storage (`localStorage`), dynamic proxying via `/api/v1`, and unified error parsing.
+  - **Operational Dashboard Views (`web/src/views/`)**:
+    - `Shell.tsx`: Responsive navigation shell with live backend health beacon, API key settings modal, and mobile responsive drawer.
+    - `OverviewView.tsx`: Max-anchored risk score gauge (0-100), deterministic priority distribution bar chart (P1-P5 via Recharts), key metrics cards, and recent assessment runs.
+    - `AssessmentLaunchView.tsx`: Target scope configuration with real-time scope validator feedback (`POST /api/v1/scope/validate`), port preset accelerators, background scan launch, animated real-time probe progress bar (`completed_probes / total_probes`, percentage, elapsed seconds), cooperative scan cancellation, and execution history table.
+    - `AssetInventoryView.tsx`: Searchable and filterable asset inventory with criticality badges; detailed slide-out inspection drawer displaying observed transport listeners, application banners, and CPE identifiers.
+    - `FindingsTriageView.tsx`: Multi-facet filtering by severity, priority tier, and lifecycle state; CISA Known Exploited Vulnerability (KEV) callout banners; finding drill-down with CVSS and remediation advice; interactive state transitions (`confirmed`, `false_positive`, `accepted_risk`, `needs_review`) with auditable justification notes stored in finding evidence.
+    - `AssessmentDiffView.tsx`: Coverage-aware comparison of database runs or standalone JSON snapshot payloads; visual risk drift badge ($\Delta \text{Score}$ and direction `IMPROVED`, `DEGRADED`, `STABLE`); executive SOC briefing narrative; port state transitions (opened, closed, uncertain); software version update detector; and remediated vs new findings.
+    - `ReportsView.tsx`: One-click streaming downloads for self-contained HTML, JSON, Markdown, and CSV reports with appropriate MIME types; point-in-time JSON snapshot export; and schema-validated external snapshot import.
+  - **CLI & FastAPI Integration**:
+    - Mounted pre-built web dashboard (`web/dist`) under `/ui` and static assets under `/assets` in `create_app` in `src/reconforge/api/app.py`.
+    - Added Web Dashboard link to `reconforge serve` terminal launch banner.
+    - Added unit test suite `tests/unit/test_api_dashboard.py`.
+- **Files Created**:
+  - `web/package.json`
+  - `web/package-lock.json`
+  - `web/tsconfig.json`
+  - `web/tsconfig.node.json`
+  - `web/vite.config.ts`
+  - `web/tailwind.config.js`
+  - `web/postcss.config.js`
+  - `web/index.html`
+  - `web/public/shield.svg`
+  - `web/src/index.css`
+  - `web/src/main.tsx`
+  - `web/src/App.tsx`
+  - `web/src/api/types.ts`
+  - `web/src/api/client.ts`
+  - `web/src/components/layout/Shell.tsx`
+  - `web/src/views/OverviewView.tsx`
+  - `web/src/views/AssessmentLaunchView.tsx`
+  - `web/src/views/AssetInventoryView.tsx`
+  - `web/src/views/FindingsTriageView.tsx`
+  - `web/src/views/AssessmentDiffView.tsx`
+  - `web/src/views/ReportsView.tsx`
+  - `web/dist/` (compiled bundle)
+  - `tests/unit/test_api_dashboard.py`
+- **Files Modified**:
+  - `.gitignore` (ignored web/node_modules, web/.vite; unignored web/dist)
+  - `pyproject.toml` (bumped to 0.9.0)
+  - `src/reconforge/__init__.py` (bumped to 0.9.0)
+  - `src/reconforge/api/config.py` (dynamic version from reconforge)
+  - `src/reconforge/api/app.py` (mounted dashboard under /ui and /assets)
+  - `src/reconforge/cli.py` (added dashboard URL to serve banner)
+  - `CHANGELOG.md` (documented v0.9.0 release)
+  - `progress/decisions.md` (added ADR-018)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Frontend TypeScript compilation and Vite production bundling: 100% clean in 3.99s.
+  - Test suite expanded to 165 tests across unit, integration, and security boundaries. All 165 tests passed (100%).
+  - Static security analysis: Bandit reported 0 issues across 10,271 LOC.
+  - Code formatting & linting: Ruff reported 0 errors across 112 files.
+- **Next Recommended Action**: Obtain user review and approval for Phase 9; then proceed to Phase 10 (Production Packaging, CLI Integration & Final Release).
+
 
 
 

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-01
+
+### Added
+- **Modern Security Intelligence Web Dashboard (`web/`)**:
+  - High-performance Single Page Application (SPA) built with React 18, TypeScript, Vite, Tailwind CSS, Lucide icons, and Recharts.
+  - Dark-mode-first cybersecurity SOC aesthetic with responsive desktop and mobile navigation layouts.
+  - Strongly-typed API client (`web/src/api/client.ts` and `web/src/api/types.ts`) providing full client-side coverage for all FastAPI v1 endpoints with optional API key header management.
+- **Dedicated Dashboard Modules & Views**:
+  - **Posture Overview (`OverviewView.tsx`)**: Attack-surface risk score gauge (0-100), deterministic priority distribution bar chart (P1-P5), perimeter KPI cards (assets, findings, KEV exploits, active rules), and recent assessment runs.
+  - **Scan & Assess (`AssessmentLaunchView.tsx`)**: Target scope configuration, live scope boundary validation (`POST /api/v1/scope/validate`), port preset accelerators, background scan launch (`POST /api/v1/assessments`), animated real-time probe progress bar (`completed_probes / total_probes`, percentage, elapsed seconds), cooperative scan cancellation (`POST /api/v1/assessments/{id}/cancel`), and historical execution table.
+  - **Asset Inventory (`AssetInventoryView.tsx`)**: Filterable inventory grid with search (IP/hostname) and criticality filters (`critical`, `high`, `medium`, `low`); detailed host slide-out drawer displaying observed transport listeners, application banners, and CPE identifiers.
+  - **Vulnerabilities Triage (`FindingsTriageView.tsx`)**: Multi-facet filtering by severity, priority tier, and lifecycle state; CISA Known Exploited Vulnerability (KEV) callout banners; finding drill-down with CVSS and remediation advice; interactive state transitions (`confirmed`, `false_positive`, `accepted_risk`, `needs_review`) with auditable justification notes stored in finding evidence.
+  - **Assessment Differencer (`AssessmentDiffView.tsx`)**: Coverage-aware comparison of database runs or standalone JSON snapshot payloads; visual risk drift badge ($\Delta \text{Score}$ and direction `IMPROVED`, `DEGRADED`, `STABLE`); executive SOC briefing narrative; port state transitions (opened, closed, uncertain); software version update detector; and remediated vs new findings.
+  - **Audit Reports & Snapshots (`ReportsView.tsx`)**: One-click streaming downloads for self-contained HTML, JSON, Markdown, and CSV reports with appropriate MIME types; point-in-time JSON snapshot export; and schema-validated external snapshot import.
+- **Unified Local Serving & CLI Integration**:
+  - FastAPI application (`src/reconforge/api/app.py`) automatically serves the pre-built web dashboard under `/ui` and static assets under `/assets` when `web/dist` exists.
+  - `reconforge serve` CLI banner displays the direct Web Dashboard URL (`http://127.0.0.1:8000/ui`).
+- **Testing & Verification**:
+  - Added unit test suite `tests/unit/test_api_dashboard.py` verifying `/ui`, `/ui/{catchall}`, `/shield.svg`, and API root metadata.
+  - Total test suite expanded to 165 tests (100% pass rate).
+  - Maintained 0 Bandit static security warnings across 10,271 lines of code.
+  - 100% clean Ruff linter and formatter compliance.
+  - Architecture Decision Record ADR-018 added to `progress/decisions.md`.
+
 ## [0.8.0] - 2026-11-01
 
 ### Added
