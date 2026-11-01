@@ -390,7 +390,79 @@
   - Test suite expanded to 136 tests across unit, integration, and security boundaries. All 136 tests passed (100%).
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 8,487 LOC.
   - Code formatting & linting: Ruff reported 0 errors, 85 files verified clean.
-- **Next Recommended Action**: Obtain user review and approval for Phase 7; then proceed to Phase 8 (FastAPI Local Security Intelligence API).
+
+## Phase 8: FastAPI Local Security Intelligence API
+- **Status**: COMPLETE (Ready for User Review / Approval for Phase 9)
+- **Implemented Features**:
+  - **FastAPI Core & Middleware Architecture (`src/reconforge/api/`)**:
+    - `APISettings`: Environment configuration (`RECONFORGE_API_HOST`, `PORT`, `API_KEY`, `CORS_ORIGINS`, `DB_URL`), payload size limit (10 MB).
+    - `PayloadSizeLimitMiddleware`: Rejects requests exceeding 10 MB with HTTP 413 Payload Too Large.
+    - `RequestTimingMiddleware`: Attaches `X-Process-Time` diagnostic header in seconds.
+    - `verify_api_key`: Constant-time comparison (`secrets.compare_digest`) via `X-API-Key` or `Authorization: Bearer <key>` when configured.
+    - Full dependency injection wiring across all ReconForge engines: `DatabaseManager`, `AssetRepository`, `ExposureEngine`, `VulnerabilityCorrelator`, `AttackSurfaceCalculator`, `AssessmentDifferencer`, `ReportEngine`, `SnapshotManager`.
+    - `ScanExecutionManager`: Async background task orchestration (`_execute_scan`) with live probe telemetry (`ScanProgress`) and cooperative cancellation (`cancel_scan`).
+    - Standardized Pydantic DTO models across all requests and responses in `models.py`.
+    - OpenAPI/Swagger documentation (`/docs`, `/redoc`, `/openapi.json`).
+  - **RESTful Endpoints & Routers (`src/reconforge/api/routes/`)**:
+    - `system.py`: `GET /api/v1/health` (liveness probe), `GET /api/v1/system` (engine diagnostics, rule counts, capability matrix).
+    - `scope.py`: `POST /api/v1/scope/validate` (target boundary validation against private/public network policy and cloud metadata SSRF guards).
+    - `assessments.py`: Full CRUD for assessments (`POST /api/v1/assessments` returning 202 Accepted, `GET /api/v1/assessments` with status filtering/pagination, `GET /api/v1/assessments/{id}` with live progress, `POST /api/v1/assessments/{id}/cancel`, `DELETE /api/v1/assessments/{id}`).
+    - `assets.py`: `GET /api/v1/assets` (search, pagination, criticality filtering), `GET /api/v1/assets/{id_or_ip}` (detailed asset record, services, findings count).
+    - `findings.py`: `GET /api/v1/findings` (filtering by severity, priority, state, assessment, asset), `GET /api/v1/findings/{id}`, `PATCH /api/v1/findings/{id}/state` (lifecycle state transitions with audit trail recorded in evidence).
+    - `scoring.py`: `GET /api/v1/scoring/{assessment_id}` (estate posture score, priority breakdown), `GET /api/v1/scoring/{assessment_id}/assets/{asset_id}` (step-by-step mathematical score breakdown and explanations).
+    - `diff.py`: `POST /api/v1/diff` (differencing stored assessments by ID), `POST /api/v1/diff/snapshots` (direct comparison of uploaded snapshot JSON payloads).
+    - `reports.py`: `GET /api/v1/reports/{assessment_id}` (exporting and streaming HTML, JSON, Markdown, or CSV reports with appropriate MIME types and `Content-Disposition` headers).
+    - `snapshots.py`: `GET /api/v1/snapshots/export/{assessment_id}` (downloading snapshot JSON), `POST /api/v1/snapshots/import` (securely importing and validating untrusted snapshots).
+  - **Command-Line Interface (`src/reconforge/cli.py`)**:
+    - Added `reconforge serve [--host 127.0.0.1] [--port 8000] [--reload] [--api-key KEY] [--cors-origins ORIGINS] [--workers N]`.
+    - Rich status banner with host, port, authentication status, and non-loopback exposure warnings.
+  - **Repository & Engine Resilience**:
+    - Updated `AssetRepository.record_scan_results` to support upsert for pre-created assessment records (preventing primary key collisions from async job launchers).
+    - Added `AssetRepository.delete_assessment` method.
+    - Enriched `SnapshotManager.export_snapshot` key resilience for `ip_address`/`target_ip`.
+    - Added direct Pydantic model support to `SnapshotManager.import_snapshot`.
+- **Files Created**:
+  - `src/reconforge/api/__init__.py`
+  - `src/reconforge/api/config.py`
+  - `src/reconforge/api/dependencies.py`
+  - `src/reconforge/api/manager.py`
+  - `src/reconforge/api/middleware.py`
+  - `src/reconforge/api/models.py`
+  - `src/reconforge/api/app.py`
+  - `src/reconforge/api/routes/__init__.py`
+  - `src/reconforge/api/routes/system.py`
+  - `src/reconforge/api/routes/scope.py`
+  - `src/reconforge/api/routes/assessments.py`
+  - `src/reconforge/api/routes/assets.py`
+  - `src/reconforge/api/routes/findings.py`
+  - `src/reconforge/api/routes/scoring.py`
+  - `src/reconforge/api/routes/diff.py`
+  - `src/reconforge/api/routes/reports.py`
+  - `src/reconforge/api/routes/snapshots.py`
+  - `tests/unit/test_api_app.py`
+  - `tests/unit/test_api_auth.py`
+  - `tests/unit/test_api_system_scope.py`
+  - `tests/unit/test_api_assessments.py`
+  - `tests/unit/test_api_assets_findings.py`
+  - `tests/unit/test_api_scoring_diff.py`
+  - `tests/unit/test_api_reports_snapshots.py`
+  - `tests/integration/test_api_scan_flow.py`
+  - `tests/security/test_api_security.py`
+- **Files Modified**:
+  - `pyproject.toml` (bumped to 0.8.0, added fastapi, uvicorn, httpx, ignored B008)
+  - `src/reconforge/__init__.py` (bumped to 0.8.0)
+  - `src/reconforge/inventory/repository.py` (added delete_assessment, upsert record_scan_results)
+  - `src/reconforge/inventory/snapshot.py` (enhanced export and import resilience)
+  - `src/reconforge/cli.py` (added serve command)
+  - `CHANGELOG.md` (documented v0.8.0 release)
+  - `progress/decisions.md` (added ADR-017)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Test suite expanded to 161 tests across unit, integration, and security boundaries. All 161 tests passed (100%).
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 10,248 LOC.
+  - Code formatting & linting: Ruff reported 0 errors, 111 files verified clean.
+- **Next Recommended Action**: Obtain user review and approval for Phase 8; then proceed to Phase 9 (Frontend Dashboard - React/TypeScript).
+
 
 
 

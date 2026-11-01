@@ -183,6 +183,19 @@
   - Synthesize human-readable executive change summaries with structured metric shifts ($\Delta \text{Score}$, direction `IMPROVED`/`DEGRADED`/`STABLE`, $\Delta \text{P1..\text{P5}}$) for high-impact executive and SOC briefings.
 - **Consequences**: Defensible, audit-proof continuous change detection that eliminates false remediation claims while maintaining complete backward compatibility.
 
-
-
-
+## ADR-017: FastAPI Local Security Intelligence Architecture
+- **Date**: 2026-11-01
+- **Status**: ACCEPTED
+- **Context**: As ReconForge expands to support enterprise automation pipelines, SOC workflows, and modern web dashboards (Phase 9 React frontend), CLI-only invocation is insufficient. A high-performance, asynchronous RESTful API service is required to expose discovery, inventory, exposure assessment, vulnerability correlation, posture scoring, differencing, and reporting programmatically.
+- **Decision**:
+  - Adopt **FastAPI** with **Uvicorn** for non-blocking asynchronous request processing and automatic OpenAPI/Swagger documentation generation (`/docs`, `/redoc`).
+  - Enforce a **Local-First Security Intelligence Model**: The REST service binds strictly to `127.0.0.1` by default. When non-loopback bindings are detected without authentication, prominent security warnings are emitted.
+  - Implement optional constant-time API key authentication (`verify_api_key`) via `X-API-Key` or `Authorization: Bearer <token>` using `secrets.compare_digest` to prevent timing side-channels.
+  - Architect asynchronous background assessment execution (`ScanExecutionManager`): Assessment creation returns an immediate `202 Accepted` response with the `assessment_id`, while probes run in tracked `asyncio` background tasks with real-time progress callbacks and cooperative task cancellation (`POST /api/v1/assessments/{id}/cancel`).
+  - Fortify API transport security:
+    - Enforce a 10 MB payload ceiling (`PayloadSizeLimitMiddleware`) to prevent memory exhaustion DoS during untrusted snapshot ingestion.
+    - Configure CORS middleware with restricted localhost development origins.
+    - Attach diagnostic execution telemetry (`RequestTimingMiddleware`) via `X-Process-Time`.
+    - Enforce strict scope boundary validation (`ScopeManager.validate_target_and_port`) on all API scan requests, immediately rejecting cloud metadata endpoints (`169.254.169.254`) and unauthorized public IPs with HTTP 403 Forbidden.
+  - Introduce `reconforge serve` CLI command with interactive Rich diagnostics and launch banners.
+- **Consequences**: High-throughput, programmable local intelligence service with OpenAPI schema adherence, zero-network scanning compatibility, and complete separation between background scan routines and HTTP request lifecycles.

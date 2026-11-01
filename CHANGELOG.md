@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-01
+
+### Added
+- **FastAPI Local Security Intelligence REST API (`src/reconforge/api/`)**:
+  - High-performance, asynchronous REST API service exposing the complete ReconForge security intelligence lifecycle.
+  - Interactive OpenAPI/Swagger documentation (`/docs`, `/redoc`, and OpenAPI v3 schema at `/openapi.json`).
+  - Secure local-first architecture defaulting strictly to `127.0.0.1` binding with non-loopback exposure warnings.
+  - Constant-time API key and Bearer token authentication (`X-API-Key` or `Authorization: Bearer <key>`) via `secrets.compare_digest` to prevent timing side-channels.
+  - Configurable CORS origins support for secure local/web dashboard integration.
+  - Request payload size protection via `PayloadSizeLimitMiddleware` rejecting requests exceeding 10 MB with HTTP 413.
+  - Diagnostic request latency telemetry via `RequestTimingMiddleware` emitting `X-Process-Time` response headers.
+- **Asynchronous Background Assessment Orchestrator (`ScanExecutionManager`)**:
+  - Non-blocking scan dispatch via `POST /api/v1/assessments` returning `202 Accepted` immediately with assessment ID.
+  - Real-time probe telemetry tracking (`completed_probes`, `total_probes`, `percentage`, `elapsed_seconds`) accessible via `GET /api/v1/assessments/{id}`.
+  - Cooperative background scan cancellation via `POST /api/v1/assessments/{id}/cancel`.
+  - Comprehensive assessment lifecycle management: pending, running, completed, cancelled, and failed.
+- **RESTful Endpoints & Router Modules**:
+  - `system.py`: `GET /api/v1/health` (liveness probe), `GET /api/v1/system` (engine diagnostics, rule metrics, capability detection).
+  - `scope.py`: `POST /api/v1/scope/validate` (target boundary validation against private/public network policy and SSRF/cloud metadata guards).
+  - `assessments.py`: Full CRUD for assessments (`POST`, `GET` with pagination/status filtering, `GET /{id}` with live progress, `POST /{id}/cancel`, `DELETE /{id}`).
+  - `assets.py`: `GET /api/v1/assets` (search, pagination, criticality filtering), `GET /api/v1/assets/{id_or_ip}` (detailed asset record, services, findings count).
+  - `findings.py`: `GET /api/v1/findings` (filtering by severity, priority, state, assessment, asset), `GET /api/v1/findings/{id}`, `PATCH /api/v1/findings/{id}/state` (finding lifecycle state transitions with audit trail recorded in evidence).
+  - `scoring.py`: `GET /api/v1/scoring/{assessment_id}` (estate posture score, priority breakdown), `GET /api/v1/scoring/{assessment_id}/assets/{asset_id}` (step-by-step mathematical score breakdown and explanations).
+  - `diff.py`: `POST /api/v1/diff` (differencing stored assessments by ID), `POST /api/v1/diff/snapshots` (direct comparison of uploaded snapshot JSON payloads).
+  - `reports.py`: `GET /api/v1/reports/{assessment_id}` (exporting and streaming HTML, JSON, Markdown, or CSV reports with appropriate MIME types and `Content-Disposition` headers).
+  - `snapshots.py`: `GET /api/v1/snapshots/export/{assessment_id}` (downloading snapshot JSON), `POST /api/v1/snapshots/import` (securely importing and validating untrusted snapshots).
+- **New CLI Command (`reconforge serve`)**:
+  - `reconforge serve [--host 127.0.0.1] [--port 8000] [--reload] [--api-key KEY] [--cors-origins ORIGINS] [--workers N]`: Launches the FastAPI server with Rich terminal status banner, auto-reload, and security warnings.
+- **Testing & Security**:
+  - Added 25 new tests across unit, integration, and security suites (161 total passing tests, 100% pass rate).
+  - Maintained 0 Bandit static security warnings across 10,248 LOC.
+  - 100% clean Ruff linter and formatter compliance.
+  - Architecture Decision Record ADR-017 added to `progress/decisions.md`.
+
 ## [0.7.0] - 2026-11-01
 
 ### Added
