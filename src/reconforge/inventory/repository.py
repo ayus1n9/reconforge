@@ -170,18 +170,29 @@ class AssetRepository:
                 }
                 for obs in observations
             ]
-            assessment = AssessmentRecord(
-                id=assessment_id,
-                name=assessment_name,
-                scope_config=scope_config,
-                scanner_version=scanner_version,
-                status=summary.status.value,
-                start_time=now,
-                end_time=now,
-                coverage_metrics=cov_metrics,
-                error_summary=None,
-            )
-            session.add(assessment)
+            stmt = select(AssessmentRecord).where(AssessmentRecord.id == assessment_id)
+            assessment = session.execute(stmt).scalar_one_or_none()
+            if assessment:
+                assessment.name = assessment_name
+                assessment.scope_config = scope_config
+                assessment.scanner_version = scanner_version
+                assessment.status = summary.status.value
+                assessment.end_time = now
+                assessment.coverage_metrics = cov_metrics
+                assessment.error_summary = None
+            else:
+                assessment = AssessmentRecord(
+                    id=assessment_id,
+                    name=assessment_name,
+                    scope_config=scope_config,
+                    scanner_version=scanner_version,
+                    status=summary.status.value,
+                    start_time=now,
+                    end_time=now,
+                    coverage_metrics=cov_metrics,
+                    error_summary=None,
+                )
+                session.add(assessment)
 
             # Process observations
             for obs in observations:
@@ -405,3 +416,16 @@ class AssetRepository:
                 session.flush()
                 session.refresh(finding)
             return finding
+
+    def delete_assessment(self, assessment_id: str) -> bool:
+        """Delete an assessment record and cascade delete associated findings."""
+        with self.db.session() as session:
+            stmt = select(AssessmentRecord).where(
+                (AssessmentRecord.id == assessment_id)
+                | (AssessmentRecord.id.startswith(assessment_id))
+            )
+            assessment = session.execute(stmt).scalars().first()
+            if assessment:
+                session.delete(assessment)
+                return True
+            return False

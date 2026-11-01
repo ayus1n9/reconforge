@@ -1801,5 +1801,114 @@ def validate_scope(
     console.print("[bold green]Scope definition is valid and enforceable.[/bold green]")
 
 
+@app.command(name="serve")
+def serve(
+    host: Annotated[
+        str,
+        typer.Option("--host", "-h", help="Network host interface to bind (default: 127.0.0.1)."),
+    ] = "127.0.0.1",
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="Port number for the API server (default: 8000)."),
+    ] = 8000,
+    reload: Annotated[
+        bool,
+        typer.Option("--reload", help="Enable automatic code reloading for development."),
+    ] = False,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help="Enforce API key authentication (or set RECONFORGE_API_KEY environment variable).",
+        ),
+    ] = None,
+    cors_origins: Annotated[
+        str | None,
+        typer.Option(
+            "--cors-origins",
+            help="Comma-separated allowed CORS origins.",
+        ),
+    ] = None,
+    workers: Annotated[
+        int,
+        typer.Option("--workers", "-w", help="Number of Uvicorn worker processes."),
+    ] = 1,
+) -> None:
+    """Launch the ReconForge FastAPI Local Security Intelligence REST API server."""
+    import os
+
+    import uvicorn
+
+    from reconforge.api.app import create_app
+    from reconforge.api.config import APISettings
+
+    origins = (
+        [o.strip() for o in cors_origins.split(",") if o.strip()]
+        if cors_origins
+        else [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+
+    settings = APISettings(
+        host=host,
+        port=port,
+        api_key=api_key,
+        cors_origins=origins,
+    )
+
+    auth_status = (
+        "[bold green]ENABLED[/bold green]"
+        if api_key
+        else "[bold yellow]DISABLED (Local-first)[/bold yellow]"
+    )
+    docs_link = f"http://{host}:{port}/docs"
+    redoc_link = f"http://{host}:{port}/redoc"
+    api_link = f"http://{host}:{port}/api/v1/health"
+
+    bind_warning = ""
+    if host not in ("127.0.0.1", "localhost", "::1") and not api_key:
+        bind_warning = (
+            "\n\n[bold white on red] SECURITY WARNING [/bold white on red]\n"
+            f"Server is binding to non-loopback interface '{host}' without an API key!\n"
+            "Anyone on your network can access scanning and inventory endpoints.\n"
+            "Use '--api-key <secret>' or bind to '127.0.0.1' to secure access."
+        )
+
+    banner_text = (
+        f"[bold cyan]ReconForge Local Security Intelligence API v{__version__}[/bold cyan]\n\n"
+        f"• [bold]Binding:[/bold] {host}:{port}\n"
+        f"• [bold]Interactive Docs (Swagger):[/bold] [link={docs_link}]{docs_link}[/link]\n"
+        f"• [bold]Alternative Docs (ReDoc):[/bold] [link={redoc_link}]{redoc_link}[/link]\n"
+        f"• [bold]Health Endpoint:[/bold] [link={api_link}]{api_link}[/link]\n"
+        f"• [bold]Authentication:[/bold] {auth_status}\n"
+        f"• [bold]CORS Origins:[/bold] {', '.join(origins)}"
+        f"{bind_warning}"
+    )
+
+    console.print(
+        Panel(
+            banner_text,
+            title="[bold green]ReconForge REST API Service[/bold green]",
+            border_style="green",
+        )
+    )
+
+    if reload:
+        os.environ["RECONFORGE_API_HOST"] = host
+        os.environ["RECONFORGE_API_PORT"] = str(port)
+        if api_key:
+            os.environ["RECONFORGE_API_KEY"] = api_key
+        if cors_origins:
+            os.environ["RECONFORGE_CORS_ORIGINS"] = cors_origins
+        uvicorn.run("reconforge.api.app:app", host=host, port=port, reload=True)
+    else:
+        app_instance = create_app(settings)
+        uvicorn.run(app_instance, host=host, port=port, workers=workers)
+
+
 if __name__ == "__main__":
     app()

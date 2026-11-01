@@ -136,7 +136,9 @@ class SnapshotManager:
             if obs_services is not None:
                 assets_by_ip: dict[str, SnapshotAsset] = {}
                 for item in obs_services:
-                    ip = item["ip_address"]
+                    ip = item.get("ip_address") or item.get("target_ip")
+                    if not ip:
+                        continue
                     if ip not in assets_by_ip:
                         asset_rec = session.execute(
                             select(AssetRecord).where(AssetRecord.ip_address == ip)
@@ -270,7 +272,7 @@ class SnapshotManager:
 
             return snapshot.model_dump_json(indent=2)
 
-    def import_snapshot(self, raw_json: str | dict) -> AssessmentRecord:
+    def import_snapshot(self, raw_json: str | dict | AssessmentSnapshot) -> AssessmentRecord:
         """Validate and import an untrusted assessment snapshot JSON into the database.
 
         Raises:
@@ -280,6 +282,8 @@ class SnapshotManager:
         try:
             if isinstance(raw_json, str):
                 data = json.loads(raw_json)
+            elif isinstance(raw_json, AssessmentSnapshot):
+                data = raw_json.model_dump(mode="json")
             else:
                 data = raw_json
         except Exception as err:
