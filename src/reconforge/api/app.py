@@ -3,6 +3,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -107,10 +108,13 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
             content={"detail": str(exc)},
         )
 
+    dist_dir = Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
+    has_web_dashboard = dist_dir.is_dir() and (dist_dir / "index.html").is_file()
+
     # Root endpoint
     @app.get("/", tags=["Root"], summary="API Root & Navigation")
     async def root():
-        return {
+        info = {
             "name": app_settings.title,
             "version": app_settings.version,
             "docs": app_settings.docs_url,
@@ -118,6 +122,28 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
             "health": "/api/v1/health",
             "system": "/api/v1/system",
         }
+        if has_web_dashboard:
+            info["dashboard"] = "/ui"
+        return info
+
+    if has_web_dashboard:
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
+
+        assets_dir = dist_dir / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="web_assets")
+
+        if (dist_dir / "shield.svg").is_file():
+
+            @app.get("/shield.svg", include_in_schema=False)
+            async def serve_shield():
+                return FileResponse(str(dist_dir / "shield.svg"))
+
+        @app.get("/ui", tags=["Dashboard"], include_in_schema=False)
+        @app.get("/ui/{catchall:path}", tags=["Dashboard"], include_in_schema=False)
+        async def serve_ui(catchall: str = ""):
+            return FileResponse(str(dist_dir / "index.html"))
 
     # Mount v1 routers under /api/v1
     from fastapi import APIRouter

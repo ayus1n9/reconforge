@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass, field
 
+from reconforge import __version__
+
 
 @dataclass
 class APISettings:
@@ -22,7 +24,7 @@ class APISettings:
     max_upload_size_bytes: int = 10 * 1024 * 1024  # 10 MB limit
     db_url: str | None = None
     title: str = "ReconForge Security Intelligence API"
-    version: str = "0.8.0"
+    version: str = __version__
     docs_url: str = "/docs"
     redoc_url: str = "/redoc"
 

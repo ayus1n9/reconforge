@@ -1865,6 +1865,7 @@ def serve(
         if api_key
         else "[bold yellow]DISABLED (Local-first)[/bold yellow]"
     )
+    dashboard_link = f"http://{host}:{port}/ui"
     docs_link = f"http://{host}:{port}/docs"
     redoc_link = f"http://{host}:{port}/redoc"
     api_link = f"http://{host}:{port}/api/v1/health"
@@ -1879,7 +1880,8 @@ def serve(
         )
 
     banner_text = (
-        f"[bold cyan]ReconForge Local Security Intelligence API v{__version__}[/bold cyan]\n\n"
+        f"[bold cyan]ReconForge Local Security Intelligence Platform v{__version__}[/bold cyan]\n\n"
+        f"• [bold]Web Dashboard:[/bold] [link={dashboard_link}]{dashboard_link}[/link]\n"
         f"• [bold]Binding:[/bold] {host}:{port}\n"
         f"• [bold]Interactive Docs (Swagger):[/bold] [link={docs_link}]{docs_link}[/link]\n"
         f"• [bold]Alternative Docs (ReDoc):[/bold] [link={redoc_link}]{redoc_link}[/link]\n"

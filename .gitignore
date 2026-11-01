@@ -58,10 +58,14 @@ data/assessments/
 logs/
 *.log
 
-# Frontend (for Phase 10)
+# Frontend Dashboard (Phase 9)
+web/node_modules/
+web/.vite/
+!web/dist/
+!web/dist/**
 frontend/node_modules/
-frontend/dist/
 frontend/.vite/
+
 
 # IDE & OS
 .idea/
