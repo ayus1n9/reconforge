@@ -168,5 +168,21 @@
   - 100% self-contained HTML: Zero external CDN stylesheets, scripts, or images. Embed all typography, color palettes, badges, responsive CSS, and layout styling directly within an inline `<style>` block.
 - **Consequences**: Safe, verifiable reporting documents that can be safely viewed in spreadsheet software and web browsers without code execution risks, even in completely air-gapped defense enclaves.
 
+## ADR-016: Coverage-Aware Attack Surface Differencing & Change Detection
+- **Date**: 2026-11-01
+- **Status**: ACCEPTED
+- **Context**: In periodic security assessments and continuous attack-surface management (ASM), naive differencing engines conflate unobserved ports with remediated ports. If a port was open in Assessment A, but excluded from Assessment B's scan scope or dropped due to network latency, naive tools report "Port closed" and "Vulnerability resolved", creating a false sense of security.
+- **Decision**:
+  - Enforce strict coverage awareness with three distinct certainty levels (`ChangeCertainty`):
+    - `DEFINITIVE`: Change confirmed by direct observation. Only when a port is explicitly probed in the comparison scan and responds with `CLOSED` (TCP RST) is it classified as closed; only when upgraded software is verified is it tagged as upgraded.
+    - `UNCERTAIN_SCOPE_MISMATCH`: An asset or port was omitted from the comparison scan's configuration (`allowed_targets` or `allowed_ports`). The absent service or vulnerability is flagged as unassessed technical debt, never falsely marked as remediated.
+    - `UNCERTAIN_REACHABILITY`: An asset timed out or became unreachable during the comparison scan.
+  - Classify scope overlap into mathematical boundary types: `IDENTICAL`, `SUPERSET`, `SUBSET`, `PARTIAL_OVERLAP`, `DISJOINT`.
+  - Enforce Snapshot Schema v1.1.0 with embedded findings and posture to enable autonomous, air-gapped comparison between two JSON files on disk without live database access.
+  - Reconstruct point-in-time assessment observations directly from `coverage_metrics["observed_services"]`, preserving immutable historical assessment fidelity while keeping asset inventory normalized.
+  - Synthesize human-readable executive change summaries with structured metric shifts ($\Delta \text{Score}$, direction `IMPROVED`/`DEGRADED`/`STABLE`, $\Delta \text{P1..\text{P5}}$) for high-impact executive and SOC briefings.
+- **Consequences**: Defensible, audit-proof continuous change detection that eliminates false remediation claims while maintaining complete backward compatibility.
+
+
 
 

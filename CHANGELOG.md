@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-01
+
+### Added
+- **Coverage-Aware Assessment Differencing Engine (`AssessmentDifferencer`)**:
+  - Semantic, mathematical comparison between assessment runs or offline JSON snapshots.
+  - Strict coverage-aware state transitions distinguishing genuine security remediations from scan scope omissions or reachability packet loss:
+    - `ChangeCertainty.DEFINITIVE`: Confirmed closed port (TCP RST), verified software version upgrade, or newly discovered listening port within active scope.
+    - `ChangeCertainty.UNCERTAIN_SCOPE_MISMATCH`: Ports or hosts unobserved in target assessment because they were omitted from scan scope config (never falsely claimed as remediated).
+    - `ChangeCertainty.UNCERTAIN_REACHABILITY`: Targets timing out or unobservable due to transient reachability loss.
+  - Comprehensive coverage boundary classification (`ScopeOverlapType`): `IDENTICAL`, `SUPERSET`, `SUBSET`, `PARTIAL_OVERLAP`, `DISJOINT`.
+  - Service modification and version upgrade detector: identifies software version bumps (e.g. `Apache 2.4.49 -> 2.4.52`), product reclassifications, and observation confidence elevations.
+  - Finding lifecycle state tracking: detects new findings, resolved findings, persisting technical debt, and regressed findings (previously accepted/resolved findings reactivated).
+  - Attack-surface risk drift analysis: computes numerical score shift ($\Delta \text{Score}$), risk rating direction (`IMPROVED`, `DEGRADED`, `STABLE`), and priority tier fluctuations ($\Delta \text{P1..\text{P5}}$).
+  - Executive narrative synthesizer (`generate_human_summary()`): plain-English, SOC-ready bulleted brief summarizing risk movement, perimeter changes, software hygiene, and remediation progress.
+- **Snapshot Schema v1.1.0 Evolution (`AssessmentSnapshot`)**:
+  - Enriched snapshot format with optional `findings: list[SnapshotFinding]` and `risk_posture: dict[str, Any]` fields.
+  - Autonomous, air-gapped comparison between standalone JSON files on disk without requiring access to the relational database.
+  - Complete 100% backward-compatibility for legacy v1.0.0 snapshots via `SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {"1.0.0", "1.1.0"}`.
+  - Reconstructs exact point-in-time observations from `coverage_metrics["observed_services"]` for historical fidelity.
+- **New Command-Line Interface (CLI) Commands**:
+  - `reconforge diff <base_id> <target_id> [--json] [--output path] [--db-path path]`: Compares two historical assessment executions stored in SQLite database.
+  - `reconforge diff-snapshots <base.json> <target.json> [--json] [--output path]`: Compares two standalone JSON snapshot files.
+  - `reconforge snapshot diff <base.json> <target.json>`: Convenient subcommand alias on `reconforge snapshot`.
+  - Rich interactive terminal UI with executive summary panel, risk drift badge, coverage boundary panel, host changes table, port transition table, service modification table, and finding drift table.
+  - Clean `--json` machine-readable output mode suitable for CI/CD automated gates and SIEM ingestion.
+- **Testing & Security**:
+  - Added 15 new automated tests across unit and integration suites (136 total passing tests, 100% pass rate).
+  - Maintained 0 Bandit static security warnings across 8,487 LOC.
+  - 100% clean Ruff linter and formatter compliance.
+
 ## [0.6.0] - 2026-10-30
 
 ### Added

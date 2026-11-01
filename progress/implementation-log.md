@@ -337,7 +337,61 @@
   - Test suite expanded to 121 tests across unit, integration, and security boundaries. All 121 tests passed (100%).
   - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 7,244 LOC.
   - Code formatting & linting: Ruff reported 0 errors, 79 files verified.
-- **Next Recommended Action**: Obtain user review and approval for Phase 6; then proceed to Phase 7 (FastAPI Local Security Intelligence API).
+- **Git & Release Operations (v0.6.0)**:
+  - Commits: `9a9b2fd`, `124749f`
+  - Tag: `v0.6.0`
+  - GitHub Release: Published at `https://github.com/ayus1n9/reconforge/releases/tag/v0.6.0`
+
+## Phase 7: Assessment Differencing & Change Detection Engine
+- **Status**: COMPLETE (Awaiting User Review / Approval for Phase 8)
+- **Implemented Features**:
+  - Domain Models for Attack-Surface Drift (`src/reconforge/diffing/models.py`):
+    - `ScopeOverlapType` (`IDENTICAL`, `SUPERSET`, `SUBSET`, `PARTIAL_OVERLAP`, `DISJOINT`).
+    - `ChangeCertainty` (`DEFINITIVE`, `UNCERTAIN_SCOPE_MISMATCH`, `UNCERTAIN_REACHABILITY`).
+    - `CoverageDelta`: analyzes target IP sets, port sets, scan duration, and scanner versions.
+    - `HostDelta`: detects added, removed, and retained host counts with certainty ratings.
+    - `PortDelta`: detects newly opened ports, closed ports, and coverage-uncertain ports.
+    - `ServiceModificationDelta`: detects software version bumps (e.g. `2.4.49 -> 2.4.52`), product reclassifications, and observation confidence elevations.
+    - `FindingDelta`: tracks newly discovered exposures, resolved vulnerabilities, persisting technical debt, and regressions.
+    - `RiskDelta`: computes numerical score delta ($\Delta \text{Score}$), direction (`IMPROVED`, `DEGRADED`, `STABLE`), and priority shifts ($\Delta \text{P1..\text{P5}}$).
+    - `AssessmentDiff`: aggregate change document with human-readable executive change summary.
+  - Assessment Differencing Engine (`src/reconforge/diffing/engine.py`):
+    - `diff_assessments(base_id, target_id, repository)`: live database assessment differencing.
+    - `diff_snapshots(base_snapshot, target_snapshot)`: offline JSON snapshot file comparison.
+    - `generate_human_summary()`: plain-English executive summary narrative synthesis.
+  - Snapshot Schema v1.1.0 Evolution (`src/reconforge/inventory/snapshot.py`):
+    - Added `SnapshotFinding` and optional `findings` and `risk_posture` fields.
+    - Reconstructed point-in-time assessment observations from `coverage_metrics["observed_services"]` for immutable assessment fidelity.
+    - Maintained 100% backward-compatibility for v1.0.0 snapshots.
+  - Command-Line Interface (`src/reconforge/cli.py`):
+    - Added `reconforge diff <base_id> <target_id> [--json] [--output path] [--db-path path]`.
+    - Added `reconforge diff-snapshots <base.json> <target.json> [--json] [--output path]`.
+    - Added `reconforge snapshot diff` alias subcommand.
+    - Terminal Rich UI with executive summary panel, risk drift badge, coverage boundaries, host changes table, port transition table, service modification table, and finding drift table.
+- **Files Created**:
+  - `src/reconforge/diffing/__init__.py`
+  - `src/reconforge/diffing/models.py`
+  - `src/reconforge/diffing/engine.py`
+  - `tests/unit/test_diffing.py`
+  - `tests/unit/test_snapshot_diffing.py`
+  - `tests/integration/test_diff_flow.py`
+- **Files Modified**:
+  - `pyproject.toml` (bumped to 0.7.0)
+  - `src/reconforge/__init__.py` (bumped to 0.7.0)
+  - `src/reconforge/inventory/snapshot.py` (enriched schema v1.1.0 and observed_services reconstruction)
+  - `src/reconforge/inventory/repository.py` (added get_assessment_assets, stored observed_services in coverage_metrics)
+  - `src/reconforge/assessment/engine.py` (filtered service evaluation to assessment observed_services)
+  - `src/reconforge/cli.py` (added diff and diff-snapshots commands, render_assessment_diff)
+  - `tests/unit/test_snapshots.py` (accepted v1.1.0 schema)
+  - `CHANGELOG.md` (documented v0.7.0 release)
+  - `progress/decisions.md` (added ADR-016)
+  - `progress/validation-results.md`
+- **Validation**:
+  - Test suite expanded to 136 tests across unit, integration, and security boundaries. All 136 tests passed (100%).
+  - Static security analysis: Bandit reported 0 issues (0 High, 0 Medium, 0 Low) across 8,487 LOC.
+  - Code formatting & linting: Ruff reported 0 errors, 85 files verified clean.
+- **Next Recommended Action**: Obtain user review and approval for Phase 7; then proceed to Phase 8 (FastAPI Local Security Intelligence API).
+
 
 
 
