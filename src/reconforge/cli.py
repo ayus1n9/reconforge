@@ -30,13 +30,20 @@ from reconforge.core.models import (
     TargetScope,
 )
 from reconforge.core.scope import ScopeManager
+from reconforge.diffing.engine import AssessmentDifferencer
+from reconforge.diffing.models import (
+    AssessmentDiff,
+    ChangeCertainty,
+    RiskDirection,
+    ScopeOverlapType,
+)
 from reconforge.discovery.dns_resolver import DNSResolver
 from reconforge.discovery.tcp_scanner import AsyncTCPScanner
 from reconforge.intelligence.builtin_cves import BUILTIN_CVES
 from reconforge.intelligence.cache import VulnerabilityCache
 from reconforge.intelligence.correlator import VulnerabilityCorrelator
 from reconforge.inventory.repository import AssetRepository
-from reconforge.inventory.snapshot import SnapshotManager
+from reconforge.inventory.snapshot import AssessmentSnapshot, SnapshotManager
 from reconforge.reporting.engine import ReportEngine
 from reconforge.scoring.calculator import AttackSurfaceCalculator
 from reconforge.storage.database import DatabaseManager
@@ -119,6 +126,279 @@ def format_priority(priority: str) -> str:
     elif p == "P4":
         return "[bold blue]P4[/bold blue]"
     return "[dim]P5[/dim]"
+
+
+def format_certainty(certainty: ChangeCertainty | str) -> str:
+    """Format change certainty badge."""
+    c = str(certainty.value if hasattr(certainty, "value") else certainty).lower()
+    if c == "definitive":
+        return "[bold green]DEFINITIVE[/bold green]"
+    elif c == "uncertain_scope_mismatch":
+        return "[bold yellow]UNCERTAIN (SCOPE MISMATCH)[/bold yellow]"
+    elif c == "uncertain_reachability":
+        return "[bold red]UNCERTAIN (REACHABILITY)[/bold red]"
+    return f"[dim]{c}[/dim]"
+
+
+def format_risk_direction(direction: RiskDirection | str) -> str:
+    """Format risk direction with appropriate terminal styling."""
+    d = str(direction.value if hasattr(direction, "value") else direction).lower()
+    if d == "improved":
+        return "[bold green]IMPROVED (RISK REDUCED)[/bold green]"
+    elif d == "degraded":
+        return "[bold red]DEGRADED (RISK INCREASED)[/bold red]"
+    return "[bold cyan]STABLE (NO NET SHIFT)[/bold cyan]"
+
+
+def render_assessment_diff(diff: AssessmentDiff, json_output: bool = False) -> str:
+    """Render comprehensive change detection and assessment diff."""
+    if json_output:
+        return diff.model_dump_json(indent=2)
+
+    # 1. Header Panel
+    console.print(
+        Panel(
+            f"[bold cyan]Base Assessment ID:[/bold cyan] {diff.base_assessment_id}\n"
+            f"[bold cyan]Target Assessment ID:[/bold cyan] {diff.target_assessment_id}\n"
+            f"[dim]Generated:[/dim] {diff.generated_at.isoformat()} | [dim]Diff UUID:[/dim] {diff.diff_id}",
+            title="[bold yellow]ReconForge Assessment Difference & Change Detection Report[/bold yellow]",
+            border_style="yellow",
+        )
+    )
+
+    # 2. Executive Narrative Summary
+    if diff.summary_narrative:
+        narrative_lines = "\n".join(f"• {bullet}" for bullet in diff.summary_narrative)
+        console.print(
+            Panel(
+                narrative_lines,
+                title="[bold blue]Executive Summary Narrative[/bold blue]",
+                border_style="blue",
+            )
+        )
+
+    # 3. Coverage Delta Panel
+    cov = diff.coverage
+    overlap_style = "green" if cov.overlap_type == ScopeOverlapType.IDENTICAL else "yellow"
+    coverage_text = (
+        f"[bold]Scope Boundary Overlap:[/bold] [{overlap_style}]{cov.overlap_type.value.upper()}[/{overlap_style}]\n"
+        f"[bold]Target Scope:[/bold] {len(cov.base_targets)} base targets vs {len(cov.target_targets)} target targets "
+        f"({len(cov.common_targets)} common, {len(cov.unscanned_targets)} omitted, {len(cov.new_targets)} added)\n"
+        f"[bold]Port Scope:[/bold] {cov.base_ports_count} base ports vs {cov.target_ports_count} target ports "
+        f"({cov.common_ports_count} common, {cov.unscanned_ports_count} unprobed, {cov.new_ports_count} newly probed)\n"
+        f"[bold]Coverage Complete:[/bold] {'[green]YES[/green]' if cov.is_coverage_complete else '[bold red]NO (Scope Drift Detected)[/bold red]'}"
+    )
+    if cov.warnings:
+        coverage_text += "\n\n[bold yellow]Coverage Warnings:[/bold yellow]"
+        for w in cov.warnings:
+            coverage_text += f"\n  ⚠ {w}"
+
+    console.print(
+        Panel(
+            coverage_text,
+            title="[bold cyan]Coverage & Scan Boundary Delta[/bold cyan]",
+            border_style="cyan",
+        )
+    )
+
+    # 4. Attack Surface Risk Delta Panel
+    risk = diff.risk
+    score_delta_sign = "+" if risk.score_delta > 0 else ""
+    score_style = "red" if risk.score_delta > 0 else ("green" if risk.score_delta < 0 else "cyan")
+    p_shifts = []
+    for p in ["P1", "P2", "P3", "P4", "P5"]:
+        delta_p = risk.priority_changes.get(p, 0)
+        p_sign = f"+{delta_p}" if delta_p > 0 else str(delta_p)
+        color = "red" if delta_p > 0 else ("green" if delta_p < 0 else "dim")
+        p_shifts.append(f"{p}: [{color}]{p_sign}[/{color}]")
+
+    risk_text = (
+        f"[bold]Attack Surface Score:[/bold] {risk.base_score:.1f} → {risk.target_score:.1f} "
+        f"([{score_style}]{score_delta_sign}{risk.score_delta:.1f}[/{score_style}])\n"
+        f"[bold]Posture Direction:[/bold] {format_risk_direction(risk.direction)}\n"
+        f"[bold]Risk Tier Drift:[/bold] {risk.base_risk_level.upper()} → {risk.target_risk_level.upper()}\n"
+        f"[bold]Priority Drift:[/bold] {' | '.join(p_shifts)}"
+    )
+    console.print(
+        Panel(
+            risk_text,
+            title="[bold magenta]Attack-Surface Risk Drift[/bold magenta]",
+            border_style="magenta",
+        )
+    )
+
+    # 5. Host Changes
+    if diff.added_hosts or diff.removed_hosts:
+        h_table = Table(title="Host Inventory Changes", border_style="cyan")
+        h_table.add_column("IP Address", style="bold")
+        h_table.add_column("Change", justify="center")
+        h_table.add_column("Hostnames")
+        h_table.add_column("Criticality")
+        h_table.add_column("Certainty")
+        h_table.add_column("Reason / Detail")
+
+        for h in diff.added_hosts:
+            h_table.add_row(
+                h.ip_address,
+                "[bold green]+ ADDED[/bold green]",
+                ", ".join(h.hostnames) if h.hostnames else "-",
+                h.criticality.upper(),
+                format_certainty(h.certainty),
+                h.reason or "Newly discovered host responding to scan",
+            )
+        for h in diff.removed_hosts:
+            change_badge = (
+                "[bold red]- REMOVED[/bold red]"
+                if h.certainty == ChangeCertainty.DEFINITIVE
+                else "[yellow]? UNREACHABLE[/yellow]"
+            )
+            h_table.add_row(
+                h.ip_address,
+                change_badge,
+                ", ".join(h.hostnames) if h.hostnames else "-",
+                h.criticality.upper(),
+                format_certainty(h.certainty),
+                h.reason or "Host absent or not responding",
+            )
+        console.print(h_table)
+    else:
+        console.print(
+            f"[dim]No host inventory changes ({diff.retained_hosts_count} retained hosts).[/dim]"
+        )
+
+    # 6. Port & Transport Changes
+    if diff.opened_ports or diff.closed_ports or diff.uncertain_ports:
+        p_table = Table(title="Port & Exposure Transport Changes", border_style="cyan")
+        p_table.add_column("IP Address", style="bold")
+        p_table.add_column("Port/Proto")
+        p_table.add_column("State Transition", justify="center")
+        p_table.add_column("Identified Service")
+        p_table.add_column("Certainty")
+        p_table.add_column("Analysis / Evidence")
+
+        for p in diff.opened_ports:
+            svc_desc = p.service_name
+            if p.product:
+                svc_desc += f" ({p.product} {p.version or ''})".strip()
+            p_table.add_row(
+                p.ip_address,
+                f"{p.port}/{p.protocol}",
+                "[bold green]+ OPENED[/bold green]",
+                svc_desc,
+                format_certainty(p.certainty),
+                p.reason or "Newly listening port",
+            )
+        for p in diff.closed_ports:
+            svc_desc = p.service_name
+            if p.product:
+                svc_desc += f" ({p.product} {p.version or ''})".strip()
+            p_table.add_row(
+                p.ip_address,
+                f"{p.port}/{p.protocol}",
+                "[bold blue]- CLOSED[/bold blue]",
+                svc_desc,
+                format_certainty(p.certainty),
+                p.reason or "Definitively closed (remediated)",
+            )
+        for p in diff.uncertain_ports:
+            svc_desc = p.service_name
+            if p.product:
+                svc_desc += f" ({p.product} {p.version or ''})".strip()
+            p_table.add_row(
+                p.ip_address,
+                f"{p.port}/{p.protocol}",
+                "[bold yellow]? UNCERTAIN[/bold yellow]",
+                svc_desc,
+                format_certainty(p.certainty),
+                p.reason or "Coverage difference or reachability loss",
+            )
+        console.print(p_table)
+    else:
+        console.print("[dim]No port state additions or closures detected.[/dim]")
+
+    # 7. Service Modifications & Upgrades
+    if diff.modified_services:
+        s_table = Table(title="Service Identification & Version Modifications", border_style="cyan")
+        s_table.add_column("Target", style="bold")
+        s_table.add_column("Port/Proto")
+        s_table.add_column("Previous Observation")
+        s_table.add_column("Current Observation")
+        s_table.add_column("Type", justify="center")
+        s_table.add_column("Notes")
+
+        for s in diff.modified_services:
+            old_prod = f"{s.old_product} {s.old_version or ''}".strip() or s.old_service_name
+            new_prod = f"{s.new_product} {s.new_version or ''}".strip() or s.new_service_name
+            type_badge = (
+                "[bold green]SOFTWARE UPGRADE[/bold green]"
+                if s.is_upgrade
+                else "[cyan]SERVICE RECLASSIFIED[/cyan]"
+            )
+            s_table.add_row(
+                s.ip_address,
+                f"{s.port}/{s.protocol}",
+                f"{old_prod} [dim]({s.old_confidence})[/dim]",
+                f"{new_prod} [dim]({s.new_confidence})[/dim]",
+                type_badge,
+                s.notes or "",
+            )
+        console.print(s_table)
+
+    # 8. Finding Drift
+    if diff.new_findings or diff.resolved_findings or diff.regressed_findings:
+        f_table = Table(title="Exposure Rule Findings & Vulnerability Drift", border_style="cyan")
+        f_table.add_column("Rule / CVE", style="bold")
+        f_table.add_column("Title")
+        f_table.add_column("Target")
+        f_table.add_column("Severity", justify="center")
+        f_table.add_column("Priority", justify="center")
+        f_table.add_column("Transition", justify="center")
+        f_table.add_column("Certainty")
+
+        for f in diff.new_findings:
+            ref = f.cve_id or f.rule_id
+            target_str = f"{f.target_ip}:{f.port}" if f.port else f.target_ip
+            f_table.add_row(
+                ref,
+                f.title,
+                target_str,
+                format_severity(f.severity),
+                format_priority(f.priority),
+                "[bold red]+ NEW EXPOSURE[/bold red]",
+                format_certainty(f.certainty),
+            )
+        for f in diff.regressed_findings:
+            ref = f.cve_id or f.rule_id
+            target_str = f"{f.target_ip}:{f.port}" if f.port else f.target_ip
+            f_table.add_row(
+                ref,
+                f.title,
+                target_str,
+                format_severity(f.severity),
+                format_priority(f.priority),
+                "[bold magenta]⚠ REGRESSED[/bold magenta]",
+                format_certainty(f.certainty),
+            )
+        for f in diff.resolved_findings:
+            ref = f.cve_id or f.rule_id
+            target_str = f"{f.target_ip}:{f.port}" if f.port else f.target_ip
+            f_table.add_row(
+                ref,
+                f.title,
+                target_str,
+                format_severity(f.severity),
+                format_priority(f.priority),
+                "[bold green]✓ RESOLVED[/bold green]",
+                format_certainty(f.certainty),
+            )
+        console.print(f_table)
+
+    if diff.persisting_findings:
+        console.print(
+            f"[dim]Persisting technical debt: {len(diff.persisting_findings)} unchanged active exposures.[/dim]"
+        )
+
+    return ""
 
 
 @app.command()
@@ -1399,6 +1679,88 @@ def report_export_cmd(
         organization=organization,
         db_path=db_path,
     )
+
+
+@app.command("diff")
+def diff_cmd(
+    base_id: Annotated[str, typer.Argument(help="Base (older) assessment UUID or prefix.")],
+    target_id: Annotated[str, typer.Argument(help="Target (newer) assessment UUID or prefix.")],
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output raw JSON diff format.")
+    ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option("--output", "-o", help="Optional file path to save diff report to."),
+    ] = None,
+    db_path: Annotated[
+        str | None, typer.Option("--db-path", help="Path to SQLite database file.")
+    ] = None,
+) -> None:
+    """Compare two assessments and detect attack-surface drift and exposure changes."""
+    db_url = f"sqlite:///{db_path}" if db_path else None
+    repo = AssetRepository(DatabaseManager(db_url) if db_url else DatabaseManager())
+    differencer = AssessmentDifferencer()
+
+    try:
+        diff = differencer.diff_assessments(base_id, target_id, repo)
+    except Exception as err:
+        console.print(f"[bold red]Assessment Differencing Failed:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+    rendered = render_assessment_diff(diff, json_output=json_output)
+    if json_output:
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(rendered)
+            console.print(f"[bold green]JSON diff report written to:[/bold green] {output}")
+        else:
+            typer.echo(rendered)
+    elif output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(diff.model_dump_json(indent=2))
+        console.print(f"[bold green]Diff results exported to:[/bold green] {output}")
+
+
+@app.command("diff-snapshots")
+@snapshot_app.command("diff")
+def diff_snapshots_cmd(
+    base_path: Annotated[str, typer.Argument(help="Path to base assessment JSON snapshot file.")],
+    target_path: Annotated[
+        str, typer.Argument(help="Path to target assessment JSON snapshot file.")
+    ],
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output raw JSON diff format.")
+    ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option("--output", "-o", help="Optional file path to save diff report to."),
+    ] = None,
+) -> None:
+    """Compare two offline assessment JSON snapshot files with coverage awareness."""
+    differencer = AssessmentDifferencer()
+
+    try:
+        with open(base_path, encoding="utf-8") as f:
+            base_snap = AssessmentSnapshot.model_validate_json(f.read())
+        with open(target_path, encoding="utf-8") as f:
+            target_snap = AssessmentSnapshot.model_validate_json(f.read())
+        diff = differencer.diff_snapshots(base_snap, target_snap)
+    except Exception as err:
+        console.print(f"[bold red]Snapshot Differencing Failed:[/bold red] {err}")
+        raise typer.Exit(code=1) from err
+
+    rendered = render_assessment_diff(diff, json_output=json_output)
+    if json_output:
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(rendered)
+            console.print(f"[bold green]JSON diff report written to:[/bold green] {output}")
+        else:
+            typer.echo(rendered)
+    elif output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(diff.model_dump_json(indent=2))
+        console.print(f"[bold green]Diff results exported to:[/bold green] {output}")
 
 
 @app.command()

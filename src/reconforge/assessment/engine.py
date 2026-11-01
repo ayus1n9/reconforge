@@ -264,8 +264,25 @@ class ExposureEngine:
             asset_stmt = select(AssetRecord).options(selectinload(AssetRecord.services))
             assets = session.execute(asset_stmt).scalars().all()
 
+            # If the assessment recorded point-in-time observed services, filter to only
+            # services active during this assessment run.
+            obs_services = (assessment.coverage_metrics or {}).get("observed_services")
+            active_port_keys: set[tuple[str, int, str]] | None = None
+            if obs_services is not None:
+                active_port_keys = {
+                    (item["ip_address"], item["port"], item.get("protocol", "tcp"))
+                    for item in obs_services
+                    if item.get("state") in ("open", "PortState.OPEN")
+                }
+
             for asset in assets:
                 for service in asset.services:
+                    if (
+                        active_port_keys is not None
+                        and (asset.ip_address, service.port, service.protocol)
+                        not in active_port_keys
+                    ):
+                        continue
                     for rule in self.list_rules(enabled_only=True):
                         matched, reasons = self.evaluate_service(
                             rule=rule,

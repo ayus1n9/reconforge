@@ -147,6 +147,29 @@ class AssetRepository:
         """Persist an assessment run along with all associated asset and service updates atomically."""
         with self.db.session() as session:
             now = datetime.now(UTC)
+            cov_metrics = summary.model_dump()
+            cov_metrics["observed_services"] = [
+                {
+                    "ip_address": obs.target_ip,
+                    "hostname": obs.hostname,
+                    "port": obs.port,
+                    "protocol": (
+                        obs.protocol.value if hasattr(obs.protocol, "value") else str(obs.protocol)
+                    ),
+                    "state": (obs.state.value if hasattr(obs.state, "value") else str(obs.state)),
+                    "service_name": obs.service.service_name if obs.service else "unknown",
+                    "product": obs.service.product if obs.service else None,
+                    "version": obs.service.version if obs.service else None,
+                    "confidence": (
+                        obs.service.confidence.value
+                        if (obs.service and hasattr(obs.service.confidence, "value"))
+                        else "unknown"
+                    ),
+                    "banner_snippet": obs.service.banner_snippet if obs.service else None,
+                    "cpe_candidate": obs.service.cpe_candidate if obs.service else None,
+                }
+                for obs in observations
+            ]
             assessment = AssessmentRecord(
                 id=assessment_id,
                 name=assessment_name,
@@ -155,7 +178,7 @@ class AssetRepository:
                 status=summary.status.value,
                 start_time=now,
                 end_time=now,
-                coverage_metrics=summary.model_dump(),
+                coverage_metrics=cov_metrics,
                 error_summary=None,
             )
             session.add(assessment)
@@ -294,6 +317,32 @@ class AssetRepository:
                 .offset(offset)
             )
             return list(session.execute(stmt).scalars().all())
+
+    def get_assessment_assets(self, assessment: AssessmentRecord) -> list[AssetRecord]:
+        """Retrieve assets relevant to the assessment scope with eager-loaded services."""
+        with self.db.session() as session:
+            allowed = assessment.scope_config.get("allowed_targets", [])
+            stmt = select(AssetRecord).options(selectinload(AssetRecord.services))
+            all_assets = list(session.execute(stmt).scalars().all())
+            if not allowed:
+                return all_assets
+
+            matched: list[AssetRecord] = []
+            for asset in all_assets:
+                for target in allowed:
+                    if asset.ip_address == target or target in (asset.observed_hostnames or []):
+                        matched.append(asset)
+                        break
+                    elif "/" in target:
+                        try:
+                            from ipaddress import ip_address, ip_network
+
+                            if ip_address(asset.ip_address) in ip_network(target, strict=False):
+                                matched.append(asset)
+                                break
+                        except (ValueError, TypeError) as err:
+                            logger.debug("CIDR evaluation failed for target '%s': %s", target, err)
+            return matched if matched else all_assets
 
     def list_findings(
         self,

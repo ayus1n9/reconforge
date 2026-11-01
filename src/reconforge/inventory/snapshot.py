@@ -8,16 +8,18 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from reconforge.core.exceptions import ConfigurationError
 from reconforge.fingerprinting.probes.base import sanitize_banner
 from reconforge.storage.database import DatabaseManager
-from reconforge.storage.models import AssessmentRecord, AssetRecord, ServiceRecord
+from reconforge.storage.models import AssessmentRecord, AssetRecord, FindingRecord, ServiceRecord
 from reconforge.utils.network import parse_ip_or_network
 
 logger = logging.getLogger("reconforge.inventory.snapshot")
 
-CURRENT_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
+CURRENT_SNAPSHOT_SCHEMA_VERSION = "1.1.0"
+SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {"1.0.0", "1.1.0"}
 
 
 class SnapshotService(BaseModel):
@@ -72,12 +74,30 @@ class SnapshotAssessment(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str = Field(default="Assessment", max_length=150)
     scope_config: dict[str, Any] = Field(default_factory=dict)
-    scanner_version: str = Field(default="0.3.0", max_length=30)
+    scanner_version: str = Field(default="0.7.0", max_length=30)
     status: str = Field(default="completed", max_length=20)
     start_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = Field(default=None)
     coverage_metrics: dict[str, Any] = Field(default_factory=dict)
+    risk_score: float | None = Field(default=None)
     error_summary: str | None = Field(default=None, max_length=2048)
+
+
+class SnapshotFinding(BaseModel):
+    """Validated security finding in snapshot."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    rule_id: str = Field(..., max_length=100)
+    cve_id: str | None = Field(default=None, max_length=50)
+    title: str = Field(..., max_length=255)
+    description: str = Field(default="", max_length=4096)
+    severity: str = Field(default="info", max_length=20)
+    priority: str = Field(default="P4", max_length=10)
+    state: str = Field(default="confirmed", max_length=30)
+    target_ip: str = Field(..., max_length=45)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    remediation_guidance: str | None = Field(default=None)
 
 
 class AssessmentSnapshot(BaseModel):
@@ -87,6 +107,8 @@ class AssessmentSnapshot(BaseModel):
     exported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     assessment: SnapshotAssessment
     assets: list[SnapshotAsset] = Field(default_factory=list)
+    findings: list[SnapshotFinding] = Field(default_factory=list)
+    risk_posture: dict[str, Any] | None = Field(default=None)
 
 
 class SnapshotManager:
@@ -108,40 +130,121 @@ class SnapshotManager:
                 raise ConfigurationError(f"Assessment '{assessment_id}' not found.")
 
             # Load assets associated with the assessment scope or inventory
-            asset_stmt = select(AssetRecord)
-            assets_db = session.execute(asset_stmt).scalars().all()
-
             snapshot_assets: list[SnapshotAsset] = []
-            for asset in assets_db:
-                services = [
-                    SnapshotService(
-                        port=s.port,
-                        protocol=s.protocol,
-                        service_name=s.service_name,
-                        product=s.product,
-                        version=s.version,
-                        confidence=s.confidence,
-                        banner_snippet=s.banner_snippet,
-                        cpe_candidate=s.cpe_candidate,
-                        tls_metadata=s.tls_metadata,
-                        first_observed_at=s.first_observed_at,
-                        last_observed_at=s.last_observed_at,
-                        source=s.source,
+            obs_services = (assessment.coverage_metrics or {}).get("observed_services")
+
+            if obs_services is not None:
+                assets_by_ip: dict[str, SnapshotAsset] = {}
+                for item in obs_services:
+                    ip = item["ip_address"]
+                    if ip not in assets_by_ip:
+                        asset_rec = session.execute(
+                            select(AssetRecord).where(AssetRecord.ip_address == ip)
+                        ).scalar_one_or_none()
+                        assets_by_ip[ip] = SnapshotAsset(
+                            id=asset_rec.id if asset_rec else str(uuid4()),
+                            ip_address=ip,
+                            address_family="ipv6" if ":" in ip else "ipv4",
+                            observed_hostnames=(
+                                [item["hostname"]]
+                                if item.get("hostname")
+                                else (asset_rec.observed_hostnames if asset_rec else [])
+                            ),
+                            asset_type=asset_rec.asset_type if asset_rec else "host",
+                            criticality=asset_rec.criticality if asset_rec else "medium",
+                            first_observed_at=assessment.start_time,
+                            last_observed_at=assessment.end_time or assessment.start_time,
+                            discovery_sources=["tcp_scanner"],
+                            services=[],
+                        )
+                    if item.get("state") in ("open", "PortState.OPEN"):
+                        assets_by_ip[ip].services.append(
+                            SnapshotService(
+                                port=item["port"],
+                                protocol=item.get("protocol", "tcp"),
+                                service_name=item.get("service_name", "unknown"),
+                                product=item.get("product"),
+                                version=item.get("version"),
+                                confidence=item.get("confidence", "unknown"),
+                                banner_snippet=item.get("banner_snippet"),
+                                cpe_candidate=item.get("cpe_candidate"),
+                                tls_metadata=item.get("tls_metadata"),
+                                first_observed_at=assessment.start_time,
+                                last_observed_at=assessment.end_time or assessment.start_time,
+                                source="tcp_scanner",
+                            )
+                        )
+                snapshot_assets = list(assets_by_ip.values())
+            else:
+                asset_stmt = select(AssetRecord)
+                assets_db = session.execute(asset_stmt).scalars().all()
+                for asset in assets_db:
+                    services = [
+                        SnapshotService(
+                            port=s.port,
+                            protocol=s.protocol,
+                            service_name=s.service_name,
+                            product=s.product,
+                            version=s.version,
+                            confidence=s.confidence,
+                            banner_snippet=s.banner_snippet,
+                            cpe_candidate=s.cpe_candidate,
+                            tls_metadata=s.tls_metadata,
+                            first_observed_at=s.first_observed_at,
+                            last_observed_at=s.last_observed_at,
+                            source=s.source,
+                        )
+                        for s in asset.services
+                    ]
+                    snapshot_assets.append(
+                        SnapshotAsset(
+                            id=asset.id,
+                            ip_address=asset.ip_address,
+                            address_family=asset.address_family,
+                            observed_hostnames=asset.observed_hostnames or [],
+                            asset_type=asset.asset_type,
+                            criticality=asset.criticality,
+                            first_observed_at=asset.first_observed_at,
+                            last_observed_at=asset.last_observed_at,
+                            discovery_sources=asset.discovery_sources or [],
+                            services=services,
+                        )
                     )
-                    for s in asset.services
-                ]
-                snapshot_assets.append(
-                    SnapshotAsset(
-                        id=asset.id,
-                        ip_address=asset.ip_address,
-                        address_family=asset.address_family,
-                        observed_hostnames=asset.observed_hostnames or [],
-                        asset_type=asset.asset_type,
-                        criticality=asset.criticality,
-                        first_observed_at=asset.first_observed_at,
-                        last_observed_at=asset.last_observed_at,
-                        discovery_sources=asset.discovery_sources or [],
-                        services=services,
+
+            # Load findings associated with this assessment
+            finding_stmt = (
+                select(FindingRecord)
+                .options(selectinload(FindingRecord.asset))
+                .where(FindingRecord.assessment_id == assessment.id)
+            )
+            findings_db = session.execute(finding_stmt).scalars().all()
+
+            snapshot_findings: list[SnapshotFinding] = []
+            for f in findings_db:
+                target_ip = f.evidence.get("ip_address") or ""
+                if not target_ip and f.asset:
+                    target_ip = f.asset.ip_address
+                port_val = f.evidence.get("port")
+                if port_val is not None:
+                    try:
+                        port_val = int(port_val)
+                    except (ValueError, TypeError):
+                        port_val = None
+
+                snapshot_findings.append(
+                    SnapshotFinding(
+                        id=f.id,
+                        rule_id=f.rule_id,
+                        cve_id=f.cve_id,
+                        title=f.title,
+                        description=f.description or "",
+                        severity=f.severity,
+                        priority=f.priority or "P4",
+                        state=f.state,
+                        target_ip=target_ip,
+                        port=port_val,
+                        evidence=f.evidence or {},
+                        remediation_guidance=f.remediation_guidance,
                     )
                 )
 
@@ -157,9 +260,12 @@ class SnapshotManager:
                     start_time=assessment.start_time,
                     end_time=assessment.end_time,
                     coverage_metrics=assessment.coverage_metrics,
+                    risk_score=assessment.risk_score,
                     error_summary=assessment.error_summary,
                 ),
                 assets=snapshot_assets,
+                findings=snapshot_findings,
+                risk_posture=assessment.risk_posture,
             )
 
             return snapshot.model_dump_json(indent=2)
@@ -181,9 +287,9 @@ class SnapshotManager:
 
         # Validate schema version
         schema_ver = data.get("schema_version")
-        if schema_ver != CURRENT_SNAPSHOT_SCHEMA_VERSION:
+        if schema_ver not in SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS:
             raise ConfigurationError(
-                f"Unsupported snapshot schema version '{schema_ver}'. Expected '{CURRENT_SNAPSHOT_SCHEMA_VERSION}'."
+                f"Unsupported snapshot schema version '{schema_ver}'. Expected one of: {sorted(SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS)}."
             )
 
         # Validate against strict Pydantic model (rejects malicious fields or invalid structures)
@@ -286,6 +392,46 @@ class SnapshotManager:
                             source=srv_data.source,
                         )
                         session.add(service)
+
+            # Process risk posture and score
+            if snapshot.risk_posture:
+                assessment_obj.risk_posture = snapshot.risk_posture
+            if snapshot.assessment.risk_score is not None:
+                assessment_obj.risk_score = snapshot.assessment.risk_score
+            elif snapshot.risk_posture and "overall_score" in snapshot.risk_posture:
+                try:
+                    assessment_obj.risk_score = float(snapshot.risk_posture["overall_score"])
+                except (ValueError, TypeError):
+                    pass
+
+            # Process findings
+            for f_data in snapshot.findings:
+                target_asset = session.execute(
+                    select(AssetRecord).where(AssetRecord.ip_address == f_data.target_ip)
+                ).scalar_one_or_none()
+                asset_id = target_asset.id if target_asset else None
+                if not asset_id:
+                    continue
+
+                existing_fnd = session.execute(
+                    select(FindingRecord).where(FindingRecord.id == f_data.id)
+                ).scalar_one_or_none()
+                if not existing_fnd:
+                    fnd_record = FindingRecord(
+                        id=f_data.id,
+                        assessment_id=assessment_obj.id,
+                        asset_id=asset_id,
+                        rule_id=f_data.rule_id,
+                        cve_id=f_data.cve_id,
+                        title=f_data.title,
+                        description=f_data.description,
+                        severity=f_data.severity,
+                        priority=f_data.priority,
+                        state=f_data.state,
+                        evidence=f_data.evidence,
+                        remediation_guidance=f_data.remediation_guidance,
+                    )
+                    session.add(fnd_record)
 
             session.flush()
             session.refresh(assessment_obj)

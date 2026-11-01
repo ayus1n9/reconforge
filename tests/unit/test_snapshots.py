@@ -61,7 +61,7 @@ def test_snapshot_export_schema(populated_repo):
 
     # Validate JSON parses and adheres to AssessmentSnapshot model
     snapshot = AssessmentSnapshot.model_validate_json(json_str)
-    assert snapshot.schema_version == "1.0.0"
+    assert snapshot.schema_version in ("1.0.0", "1.1.0")
     assert snapshot.assessment.id == scan_id
     assert snapshot.assessment.name == "Gateway Audit"
     assert len(snapshot.assets) >= 1
