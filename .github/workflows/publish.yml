@@ -1,0 +1,75 @@
+name: Publish Universal Package to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Publish target environment'
+        required: true
+        default: 'pypi'
+        type: choice
+        options:
+          - pypi
+          - testpypi
+
+jobs:
+  build-and-publish:
+    name: Build Universal Package & Publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build Web Dashboard
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p src/reconforge/web_dist
+          cp -r web/dist/* src/reconforge/web_dist/
+
+      - name: Install build & packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build universal wheel and sdist
+        run: |
+          python -m build
+
+      - name: Verify distribution archives
+        run: |
+          twine check dist/*
+
+      - name: Publish to TestPyPI
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.target_env == 'testpypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Publish to PyPI
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target_env == 'pypi') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
