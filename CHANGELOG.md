@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-11-02
+
+### Added
+- **Production Packaging & Self-Contained Wheel Distribution**:
+  - Embedded pre-built React 18 / TypeScript Web Dashboard assets (`web_dist/`) and declarative inspection rules into standard Python wheel (`.whl`) and source tarball (`.tar.gz`) distributions.
+  - Zero frontend dependencies required on end-user machines: running `reconforge serve` serves the UI directly on `http://127.0.0.1:8000/ui` out of the box.
+  - Configured `setuptools.package-data` and modernized `pyproject.toml` with SPDX `license = "Apache-2.0"` and `Development Status :: 5 - Production/Stable`.
+- **Enriched CLI Diagnostics (`reconforge version`)**:
+  - Added Rich system and architecture diagnostics panel displaying Python runtime, operating system, platform architecture, Nmap binary detection status, bundled Web Dashboard availability, active builtin rules count, cached CVE records count, and SQLite WAL database backend.
+  - Added `--json` flag to `reconforge version` emitting machine-readable diagnostic telemetry for CI/CD automation and health probes.
+- **End-to-End CLI Smoke Test Suite (`tests/integration/test_e2e_cli_smoke.py`)**:
+  - Comprehensive automated smoke test suite validating full CLI journey: `version`, `validate-scope`, `scan`, `assess`, `score`, `diff`, `report`, and `snapshot` round-trips.
+  - Expanded total automated test suite to 168 tests with a 100% pass rate.
+- **Enterprise Release Documentation**:
+  - Complete overhaul of `README.md` with architectural diagrams, CLI reference manual, REST API endpoints, web dashboard views, security guarantees, and quickstart installation.
+  - Added Architecture Decision Record ADR-019 to `progress/decisions.md`.
+
 ## [0.9.0] - 2026-11-01
 
 ### Added

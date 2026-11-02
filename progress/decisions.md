@@ -217,3 +217,17 @@
   - Unify local deployment: Mount the production-built bundle (`web/dist`) under `/ui` within the FastAPI application instance (`create_app`), advertise the dashboard link in the `reconforge serve` terminal banner, and maintain standalone Vite development proxy support.
 - **Consequences**: Complete, browser-based attack surface management experience running locally with zero external cloud dependencies, enterprise-grade responsiveness, and native integration with the ReconForge CLI.
 
+## ADR-019: Production Packaging, Web Asset Bundling & Final Release v1.0.0
+- **Date**: 2026-11-02
+- **Status**: ACCEPTED
+- **Context**: For production readiness and seamless installation via `pip install reconforge`, end users should not be expected to install Node.js, npm, or compile frontend assets manually. The compiled React web dashboard must be bundled directly within the Python distribution package (`.whl` and `.tar.gz`) while maintaining fallback support for repository-based development. Furthermore, system operators need transparent runtime diagnostics to verify their host environment (Nmap presence, rules count, CVE cache status).
+- **Decision**:
+  - Pre-compile the React/TypeScript production distribution bundle (`web/dist/`) and place the static assets into `src/reconforge/web_dist/`.
+  - Configure `[tool.setuptools.package-data]` in `pyproject.toml` to explicitly include `web_dist/**` and `rules/**/*.yaml` in binary wheel and source tarball distributions.
+  - Update `create_app` in `src/reconforge/api/app.py` to prioritize `packaged_dist = Path(__file__).resolve().parent.parent / "web_dist"`, gracefully falling back to repository `web/dist` if running in developer live mode.
+  - Upgrade `pyproject.toml` metadata: bump version to `1.0.0`, adopt standard SPDX string `license = "Apache-2.0"`, and promote Trove classifier to `Development Status :: 5 - Production/Stable`.
+  - Enhance `reconforge version` with a Rich diagnostics panel and `--json` export displaying Python runtime, host OS architecture, Nmap detection status, bundled Web Dashboard readiness, active rules count, cached CVE records count, and SQLite WAL database backend.
+  - Implement end-to-end smoke test suite (`tests/integration/test_e2e_cli_smoke.py`) testing the full CLI lifecycle (`version`, `validate-scope`, `scan`, `assess`, `score`, `diff`, `report`, `snapshot`).
+- **Consequences**: ReconForge installs as a zero-dependency, self-contained Python package where `reconforge serve` delivers the full API and interactive Web Dashboard immediately out of the box with zero external Node.js/npm dependencies on the target system.
+
+
