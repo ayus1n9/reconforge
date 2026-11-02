@@ -402,16 +402,79 @@ def render_assessment_diff(diff: AssessmentDiff, json_output: bool = False) -> s
 
 
 @app.command()
-def version() -> None:
-    """Display ReconForge version, architecture, and environment information."""
+def version(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable system diagnostic JSON."),
+    ] = False,
+) -> None:
+    """Display ReconForge version, architecture, and environment diagnostics."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    from reconforge.assessment.engine import ExposureEngine
+    from reconforge.intelligence.cache import VulnerabilityCache
+    from reconforge.storage.database import DatabaseManager
+
+    nmap_path = shutil.which("nmap")
+    nmap_status = (
+        f"[green]Available[/green] ({nmap_path})"
+        if nmap_path
+        else "[yellow]Not Found[/yellow] (Native TCP Active)"
+    )
+
+    pkg_dist = Path(__file__).resolve().parent / "web_dist"
+    repo_dist = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+    has_dashboard = (pkg_dist / "index.html").is_file() or (repo_dist / "index.html").is_file()
+    dashboard_status = (
+        "[green]Bundled & Ready[/green]" if has_dashboard else "[yellow]Not Built[/yellow]"
+    )
+
+    try:
+        rules_count = len(ExposureEngine().list_rules())
+    except Exception:
+        rules_count = 0
+
+    try:
+        db = DatabaseManager()
+        cve_cache = VulnerabilityCache(db)
+        cached_cves = cve_cache.get_stats().get("total_cves", 0)
+    except Exception:
+        cached_cves = 0
+
+    if json_output:
+        data = {
+            "version": __version__,
+            "platform": f"{platform.system()} {platform.machine()}",
+            "python_version": platform.python_version(),
+            "nmap_available": bool(nmap_path),
+            "nmap_path": nmap_path,
+            "web_dashboard_available": has_dashboard,
+            "rules_count": rules_count,
+            "cached_cves_count": cached_cves,
+            "license": "Apache-2.0",
+        }
+        console.print_json(json.dumps(data))
+        return
+
+    banner = (
+        f"[bold cyan]ReconForge Security Intelligence Platform[/bold cyan] [bold green]v{__version__}[/bold green]\n\n"
+        f"• [bold]Runtime:[/bold] Python {platform.python_version()} on {platform.system()} ({platform.machine()})\n"
+        f"• [bold]Nmap Binary:[/bold] {nmap_status}\n"
+        f"• [bold]Web Dashboard:[/bold] {dashboard_status}\n"
+        f"• [bold]Builtin Exposure Rules:[/bold] [cyan]{rules_count}[/cyan] active inspection rules\n"
+        f"• [bold]CVE Intelligence Cache:[/bold] [cyan]{cached_cves}[/cyan] correlated CVEs\n"
+        f"• [bold]Database Backend:[/bold] SQLite WAL Mode\n"
+        f"• [bold]License:[/bold] Apache-2.0\n\n"
+        f"[dim]Authorized Security Assessments & Attack Surface Management Only[/dim]"
+    )
+
     console.print(
-        Panel.fit(
-            f"[bold cyan]ReconForge[/bold cyan] [green]v{__version__}[/green]\n"
-            f"[dim]Platform:[/dim] {platform.system()} {platform.machine()} (Python {platform.python_version()})\n"
-            f"[dim]License:[/dim] Apache-2.0\n"
-            f"[dim]Mode:[/dim] Authorized Security Assessment Only",
-            title="System Information",
-            border_style="cyan",
+        Panel(
+            banner,
+            title="[bold green]System & Architecture Diagnostics[/bold green]",
+            border_style="green",
         )
     )
 

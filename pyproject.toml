@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reconforge"
-version = "0.9.0"
+version = "1.0.0"
 description = "Intelligent Network Attack-Surface Mapping, Exposure Assessment & Security Intelligence Platform"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "ReconForge Team" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -38,10 +37,22 @@ dev = [
     "ruff>=0.4.0",
     "bandit>=1.7.8",
     "httpx>=0.27.0",
+    "build>=1.2.0",
 ]
 
 [project.scripts]
 reconforge = "reconforge.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+reconforge = [
+    "web_dist/**",
+    "web_dist/assets/**",
+    "assessment/rules/*.yaml",
+    "assessment/rules/**/*.yaml",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

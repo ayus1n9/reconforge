@@ -108,7 +108,9 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
             content={"detail": str(exc)},
         )
 
-    dist_dir = Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
+    packaged_dist = Path(__file__).resolve().parent.parent / "web_dist"
+    repo_dist = Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
+    dist_dir = packaged_dist if (packaged_dist / "index.html").is_file() else repo_dist
     has_web_dashboard = dist_dir.is_dir() and (dist_dir / "index.html").is_file()
 
     # Root endpoint
