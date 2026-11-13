@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reconforge"
+name = "ReconForge"
 version = "1.0.0"
 description = "Intelligent Network Attack-Surface Mapping, Exposure Assessment & Security Intelligence Platform"
 readme = "README.md"
@@ -42,6 +42,7 @@ dev = [
 
 [project.scripts]
 reconforge = "reconforge.cli:app"
+ReconForge = "reconforge.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]

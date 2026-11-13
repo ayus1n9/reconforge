@@ -53,7 +53,7 @@ from reconforge.utils.network import parse_ports
 logger = logging.getLogger("reconforge.cli")
 
 app = typer.Typer(
-    name="reconforge",
+    name="ReconForge",
     help="ReconForge: Intelligent Network Attack-Surface Mapping & Exposure Assessment Platform.",
     add_completion=False,
 )

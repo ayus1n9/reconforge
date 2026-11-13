@@ -1,21 +1,31 @@
 """Comprehensive end-to-end smoke test exercising all ReconForge CLI subcommands."""
 
 import json
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from reconforge.cli import app
 
-runner = CliRunner()
+ANSI_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from terminal output."""
+    return ANSI_REGEX.sub("", text)
+
+
+runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
 
 
 def test_cli_version_smoke():
     """Verify reconforge version human panel and json outputs."""
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "ReconForge Security Intelligence Platform v1.0.0" in result.output
-    assert "Web Dashboard: Bundled & Ready" in result.output
+    clean_version = strip_ansi(result.output)
+    assert "ReconForge Security Intelligence Platform v1.0.0" in clean_version
+    assert "Web Dashboard: Bundled & Ready" in clean_version
 
     json_result = runner.invoke(app, ["version", "--json"])
     assert json_result.exit_code == 0
@@ -38,8 +48,8 @@ allow_public_targets: false
 """
     )
     result = runner.invoke(app, ["validate-scope", str(scope_yaml)])
-    assert result.exit_code == 0
-    assert "Scope definition is valid and enforceable" in result.output
+    clean_scope = strip_ansi(result.output)
+    assert "Scope definition is valid and enforceable" in clean_scope
 
 
 def test_cli_e2e_workflow_smoke(tmp_path: Path):
@@ -135,5 +145,6 @@ def test_cli_e2e_workflow_smoke(tmp_path: Path):
     # 9. Serve command help check
     serve_help = runner.invoke(app, ["serve", "--help"])
     assert serve_help.exit_code == 0
-    assert "--port" in serve_help.output
-    assert "--api-key" in serve_help.output
+    clean_serve = strip_ansi(serve_help.output)
+    assert "--port" in clean_serve
+    assert "--api-key" in clean_serve

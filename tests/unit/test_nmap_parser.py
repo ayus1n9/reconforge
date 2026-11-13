@@ -1,4 +1,5 @@
-"""Unit tests for NmapAdapter and XML normalization."""
+import os
+import shutil
 
 import pytest
 
@@ -61,10 +62,16 @@ def test_nmap_xml_parsing_malformed():
         adapter.parse_nmap_xml("<nmaprun><host><unclosed_tag></nmaprun>")
 
 
-def test_nmap_availability_check():
-    adapter = NmapAdapter(binary_path="/usr/bin/nmap")
-    # /usr/bin/nmap exists in this environment
-    assert adapter.is_available() is True
+def test_nmap_availability_check(monkeypatch):
+    nmap_path = shutil.which("nmap")
+    if nmap_path:
+        adapter = NmapAdapter(binary_path=nmap_path)
+        assert adapter.is_available() is True
+
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == "/mock/bin/nmap")
+    monkeypatch.setattr(os, "access", lambda p, mode: p == "/mock/bin/nmap")
+    mock_adapter = NmapAdapter(binary_path="/mock/bin/nmap")
+    assert mock_adapter.is_available() is True
 
     adapter_fake = NmapAdapter(binary_path="/path/to/nonexistent/nmap_bin")
     assert adapter_fake.is_available() is False
